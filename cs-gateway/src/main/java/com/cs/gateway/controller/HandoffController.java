@@ -14,7 +14,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 人工交接坐席 API
+ * 人工坐席 API：排队列表 / 接单 / 发消息 / 结单。
+ * <p>
+ * 与 {@link com.cs.tools.handoff.HumanHandoffTool}、{@link SessionManager} 联动：
+ * accept 后将会话置为 {@code HUMAN_ACTIVE}，与编排器自动转人工路径衔接。
  */
 @Slf4j
 @RestController

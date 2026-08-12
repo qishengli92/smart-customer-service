@@ -7,7 +7,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 /**
- * 投诉处理 Agent
+ * 投诉处理 Agent（MVP 规则模板，未接 ReActAgent）。
+ * <p>
+ * Router 将 {@code COMPLAINT} 映射到 {@code HUMAN_SERVICE}，本类偏预留；
+ * 工单由 {@link ComplaintTool} 创建，高严重度自动升级。
  */
 @Slf4j
 @Component

@@ -14,6 +14,9 @@ import org.hibernate.type.SqlTypes;
 import java.time.Instant;
 import java.util.Map;
 
+/**
+ * PG 表 {@code cs_tool_call_log}：工具调用审计（含权限/确认相关写操作）。
+ */
 @Data
 @Builder
 @NoArgsConstructor

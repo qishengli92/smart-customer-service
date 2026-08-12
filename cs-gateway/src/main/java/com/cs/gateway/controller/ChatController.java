@@ -18,7 +18,11 @@ import reactor.util.context.Context;
 import java.util.Map;
 
 /**
- * Web Chat SSE 流式控制器
+ * Web Chat 唯一入口：会话解析 → {@link SupervisorOrchestrator} → SSE 推送。
+ * <p>
+ * 数据流：{@code StreamEvent} Flux 映射为 {@code ServerSentEvent}；
+ * Reactor Context 注入 tenant/user/session（勿依赖 ThreadLocal 跨线程）。
+ * 确认续跑：{@code POST /confirmations/{id}} 走编排器 CONFIRM 状态机，不重新路由。
  */
 @Slf4j
 @RestController

@@ -17,7 +17,9 @@ import java.time.Duration;
 import java.util.Map;
 
 /**
- * 人工协作 Agent —— 排队事实固定；话术由 AgentScope {@link ReActAgent} 生成
+ * 人工协作 Agent：{@link HumanHandoffTool} 负责排队事实，ReAct 只生成安抚话术。
+ * <p>
+ * 返回 {@link AgentHandleResult}（含 handoff 标记），编排器据此切 {@code HUMAN_*} 状态。
  */
 @Slf4j
 @Component

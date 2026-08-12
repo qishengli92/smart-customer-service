@@ -9,7 +9,7 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 /**
- * 启动时自动将种子 FAQ 写入 Milvus（失败仅告警，不影响服务启动）。
+ * 启动时自动种子 FAQ 入 Milvus；失败仅告警，不阻断服务启动。
  */
 @Slf4j
 @Component

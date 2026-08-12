@@ -15,7 +15,10 @@ import org.springframework.stereotype.Component;
 import java.time.Duration;
 
 /**
- * 订单 Agent —— AgentScope {@link ReActAgent} + Toolkit(OrderQueryTool)
+ * 订单领域 Agent：AgentScope {@link ReActAgent} + {@link Toolkit}({@link OrderQueryTool})。
+ * <p>
+ * 使用 expert 档 {@link DashScopeChatModel}，挂载 {@link LangFuseAgentMiddleware}；
+ * 工具经 {@code @Tool} 注册，由 ReAct 循环自行调用（查单/改址）。
  */
 @Slf4j
 @Component

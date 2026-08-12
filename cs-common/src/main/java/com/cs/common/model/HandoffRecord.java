@@ -10,7 +10,7 @@ import java.time.Instant;
 import java.util.Map;
 
 /**
- * 人工交接记录
+ * 人工交接单领域模型：排队/接单/结单状态与技能组；热 Redis + 冷 PG 双写。
  */
 @Data
 @Builder

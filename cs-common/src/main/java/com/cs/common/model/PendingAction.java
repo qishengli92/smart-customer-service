@@ -10,7 +10,9 @@ import java.time.Instant;
 import java.util.Map;
 
 /**
- * 写操作挂起确认单
+ * HITL 写操作挂起确认单（confirmationId、工具名、参数摘要、过期时间、执行状态）。
+ * <p>
+ * 存于 PendingActionStore；用户确认后由 ConfirmedToolExecutor 幂等执行。
  */
 @Data
 @Builder

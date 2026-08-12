@@ -11,7 +11,9 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 会话模型
+ * 会话领域模型：status / activeAgent（sticky）/ contextVars 等编排状态载体。
+ * <p>
+ * 热路径经 SessionManager（本地+Redis），冷路径落 PG {@code CsSessionEntity}。
  */
 @Data
 @Builder

@@ -25,7 +25,10 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * 售后 Agent —— PermissionGate 控写操作；话术由 AgentScope {@link ReActAgent} 生成
+ * 售后领域 Agent：写路径由 {@link PermissionGate} 裁决，话术由 AgentScope {@link ReActAgent} 生成。
+ * <p>
+ * 流程：查单 → 风控 → Gate（AUTO/CONFIRM/DENY）→ 挂起时写 {@link PendingActionStore}；
+ * ReAct 不直接执行退款，用户确认后由编排器走 {@code ConfirmedToolExecutor}。
  */
 @Slf4j
 @Component

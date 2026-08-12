@@ -13,7 +13,9 @@ import org.springframework.stereotype.Component;
 import java.util.Map;
 
 /**
- * 确认后幂等执行写工具，返回模板话术（不恢复 ReAct）
+ * 用户「确认/取消」后的幂等写执行器：旁路 ReAct，直接调业务工具并返回模板话术。
+ * <p>
+ * 与编排器 CONFIRM 状态机配套；已 EXECUTED 的 PendingAction 直接回放结果防重复扣款。
  */
 @Slf4j
 @Component

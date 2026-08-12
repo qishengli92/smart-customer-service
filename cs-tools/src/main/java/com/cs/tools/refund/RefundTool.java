@@ -9,7 +9,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * 退款工具
+ * 退款写工具（敏感）：仅允许经 {@link PermissionGate} / {@link ConfirmedToolExecutor} 调用。
+ * <p>
+ * 勿注册进 ReAct Toolkit 让模型直接扣款；MVP 为内存工单。
  */
 @Slf4j
 @Component

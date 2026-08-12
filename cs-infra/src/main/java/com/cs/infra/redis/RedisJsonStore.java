@@ -11,7 +11,9 @@ import java.time.Duration;
 import java.util.Optional;
 
 /**
- * Redis JSON 存取封装（同步 API，调用方应在 boundedElastic 上执行）
+ * Redis JSON 同步读写封装：会话 / PendingAction / Handoff 等热数据底座。
+ * <p>
+ * API 为阻塞式，调用方应在 {@code boundedElastic} 执行。
  */
 @Slf4j
 @Component

@@ -7,7 +7,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * PermissionGate 裁决结果
+ * {@link com.cs.tools.permission.PermissionGate} 裁决结果载体（mode + 原因/阈值等）。
  */
 @Data
 @Builder

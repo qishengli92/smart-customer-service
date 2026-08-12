@@ -5,7 +5,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * Agent 全局配置
+ * Agent 运行参数（{@code cs.agent}）：迭代上限、短期记忆窗口、退款阈值、HITL 开关等。
  */
 @Data
 @Component

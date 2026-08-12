@@ -9,10 +9,10 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 
 /**
- * 售前咨询 Agent
+ * 售前咨询 Agent（MVP 简化逻辑，尚未接入 AgentScope {@code ReActAgent}）。
  * <p>
- * 对应架构设计中的 PreSalesAgent，负责产品推荐、方案咨询。
- * 使用 qwen3.7-plus 模型，注册产品查询和产品对比工具。
+ * 当前 Router 将 {@code PRE_SALES} 映射到 {@code KNOWLEDGE}，本类多为预留；
+ * 产品数据来自 {@link ProductQueryTool} Mock，后续应改为 Toolkit + ReAct。
  */
 @Slf4j
 @Component

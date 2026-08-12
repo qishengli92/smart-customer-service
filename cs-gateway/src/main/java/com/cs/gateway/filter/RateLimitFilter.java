@@ -12,10 +12,9 @@ import java.time.Duration;
 import java.time.Instant;
 
 /**
- * 限流过滤器
+ * 接入层简易限流（MVP：进程内窗口计数）。
  * <p>
- * 基于 Redis 令牌桶的简易限流（V1.5 阶段使用内存计数器）。
- * 生产环境需替换为 Redis + Lua 脚本实现。
+ * 生产应换 Redis + Lua 令牌桶；位置在 TraceFilter 之后，保护编排与 LLM 调用。
  */
 @Slf4j
 @Component

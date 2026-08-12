@@ -22,8 +22,9 @@ import java.time.Instant;
 import java.util.Map;
 
 /**
- * PostgreSQL 落库：会话 / 消息 / 工具审计 / 交接单。
- * 调用方应在 boundedElastic 上执行（阻塞 JDBC）。
+ * 对话冷存储门面（PostgreSQL）：会话 / 消息 / 工具审计 / 交接单。
+ * <p>
+ * 阻塞 JDBC，编排器须在 {@code boundedElastic} 调用；热状态仍走 Redis/本地缓存。
  */
 @Slf4j
 @Service

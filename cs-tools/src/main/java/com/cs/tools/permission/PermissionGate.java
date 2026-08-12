@@ -10,7 +10,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 /**
- * 写操作唯一权限裁决点（合并工具标注 + 风控结果）
+ * 写操作唯一权限裁决点：合并工具敏感度 + {@link RiskAssessResult} → AUTO / CONFIRM / DENY。
+ * <p>
+ * 领域 Agent（如售后）必须经此 Gate，禁止旁路直接调退款等写工具；
+ * 阈值参考 {@link AgentProperties#getRefundThreshold()}。
  */
 @Slf4j
 @Component

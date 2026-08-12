@@ -8,7 +8,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Milvus 客户端配置
+ * Milvus Java Client Bean 装配（连接参数来自 {@link com.cs.infra.config.MilvusProperties}）。
  */
 @Slf4j
 @Configuration

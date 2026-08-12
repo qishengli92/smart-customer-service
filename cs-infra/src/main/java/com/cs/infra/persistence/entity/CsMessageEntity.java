@@ -14,6 +14,9 @@ import org.hibernate.type.SqlTypes;
 import java.time.Instant;
 import java.util.Map;
 
+/**
+ * PG 表 {@code cs_message}：聊天消息审计（user/assistant/system）。
+ */
 @Data
 @Builder
 @NoArgsConstructor

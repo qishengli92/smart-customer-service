@@ -17,7 +17,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 
 /**
- * 短期记忆：本地滑动窗口 + Redis 备份
+ * 会话内短期记忆：本地滑动窗口 + Redis 备份。
+ * <p>
+ * 概念对齐 AgentScope 会话 Memory / {@code AgentState} 上下文，应用层自管实现；
+ * 编排器每轮读写，与长期记忆（Milvus）分离。
  */
 @Slf4j
 @Component

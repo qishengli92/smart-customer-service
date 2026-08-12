@@ -13,7 +13,9 @@ import org.springframework.stereotype.Component;
 import java.time.Duration;
 
 /**
- * 闲聊 Agent —— AgentScope {@link ReActAgent} + DashScopeChatModel(chitchat)
+ * 闲聊 / 兜底 Agent：AgentScope {@link ReActAgent} + chitchat 档低成本模型。
+ * <p>
+ * 路由失败或低置信时落此地；无 Toolkit，仅生成引导话术。
  */
 @Slf4j
 @Component

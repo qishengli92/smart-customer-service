@@ -6,7 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * 领域 Agent 处理结果：普通回复或挂起确认
+ * 领域 Agent → 编排器结果：普通 reply / 挂起 PendingAction / 转人工 Handoff。
  */
 @Data
 @Builder

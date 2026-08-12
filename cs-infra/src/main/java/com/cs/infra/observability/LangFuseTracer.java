@@ -19,7 +19,10 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * LangFuse 可观测性：本地 Span/Generation 树 + HTTP ingestion 上报
+ * LangFuse 可观测门面：编排层 Trace/Span 树 + HTTP ingestion。
+ * <p>
+ * 与 {@link com.cs.infra.agentscope.LangFuseAgentMiddleware} 分工：本类管会话级 Trace，
+ * Middleware 管 ReAct 内 Generation（模型名/Token）；二者共享 sessionId。
  */
 @Slf4j
 @Component

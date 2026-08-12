@@ -15,7 +15,10 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 会话管理：本地缓存 + Redis 热状态 + PostgreSQL 落库
+ * 会话生命周期管理：本地 ConcurrentHashMap 热缓存 + Redis 热状态 + PostgreSQL 冷落库。
+ * <p>
+ * 保存 {@link ChatSession} 的 status / activeAgent（sticky）等编排状态；
+ * ChatController 在流结束后 {@link #save}，保证 sticky 与 CONFIRM 跨请求可恢复。
  */
 @Slf4j
 @Component

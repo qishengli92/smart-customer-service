@@ -8,7 +8,12 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.scheduling.annotation.EnableAsync;
 
 /**
- * 智能客服系统 - 主启动类（MVP-1.0）
+ * 智能客服系统 Spring Boot 启动入口（MVP-1.0）。
+ * <p>
+ * 模块扫描 {@code com.cs.*}，装配链路：
+ * {@code cs-gateway}（HTTP/SSE）→ {@code cs-orchestrator}（编排）→ {@code cs-agents}
+ * （AgentScope ReActAgent）→ {@code cs-tools}/{@code cs-knowledge}/{@code cs-memory}，
+ * 基础设施在 {@code cs-infra}（DashScope / LangFuse / Redis / PG / Milvus）。
  */
 @SpringBootApplication(scanBasePackages = "com.cs")
 @EntityScan(basePackages = "com.cs.infra.persistence.entity")

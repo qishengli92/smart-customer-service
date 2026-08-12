@@ -4,7 +4,7 @@ import lombok.Builder;
 import lombok.Data;
 
 /**
- * 一次 Chat 调用选用的模型档位参数。
+ * 单次 Chat 调用的模型档位值对象（modelName / temperature / maxTokens）。
  */
 @Data
 @Builder

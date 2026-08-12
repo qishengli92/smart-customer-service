@@ -8,7 +8,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * DashScope 模型配置（绑定 cs.model.dashscope，支持嵌套 models.*）
+ * DashScope 配置绑定（{@code cs.model.dashscope}，含嵌套 {@code models.*}）。
+ * <p>
+ * 原始配置源；业务侧优先经 {@link LlmModelConfig#resolveSlot} 取值。
  */
 @Data
 @Component

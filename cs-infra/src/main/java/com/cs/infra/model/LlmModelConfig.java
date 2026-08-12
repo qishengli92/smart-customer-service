@@ -5,7 +5,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * LLM 模型配置：API Key + 各档位（router/supervisor/expert/chitchat）参数解析。
+ * LLM 配置门面：解析 API Key 与各档位（router/expert/chitchat 等）为 {@link LlmSlot}。
+ * <p>
+ * 供 {@link com.cs.infra.agentscope.AgentScopeModelConfig} 构建 DashScopeChatModel。
  */
 @Slf4j
 @Configuration

@@ -10,7 +10,10 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * AgentScope Java 2.0 模型装配：直接使用框架 {@link DashScopeChatModel}。
+ * AgentScope Java 2.0 模型 Bean 装配：构建 {@link DashScopeChatModel}。
+ * <p>
+ * 档位：{@code chitchatChatModel} / {@code expertChatModel} / {@code routerChatModel}，
+ * 参数来自 {@link LlmModelConfig}；领域 Agent 通过 {@code @Qualifier} 注入。
  */
 @Slf4j
 @Configuration

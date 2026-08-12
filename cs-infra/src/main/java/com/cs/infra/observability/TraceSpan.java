@@ -9,7 +9,7 @@ import java.time.Instant;
 import java.util.Map;
 
 /**
- * LangFuse Span 模型 - 对应一次 Agent 推理或工具调用
+ * LangFuse Span 节点：一次 Agent 步骤或工具调用（可挂 TokenUsage）。
  */
 @Data
 @Builder

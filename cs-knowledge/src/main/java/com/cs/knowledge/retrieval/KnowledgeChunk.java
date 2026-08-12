@@ -8,7 +8,7 @@ import lombok.NoArgsConstructor;
 import java.util.Map;
 
 /**
- * 知识检索结果
+ * RAG 单条检索命中（id / content / score / metadata），由 KnowledgeRetrievalService 组装。
  */
 @Data
 @Builder

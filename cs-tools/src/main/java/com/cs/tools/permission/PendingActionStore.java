@@ -17,7 +17,9 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * PendingAction 存储：优先 Redis，失败时回退进程内 Map
+ * HITL 挂起单存储：优先 Redis（TTL），失败回退进程内 Map。
+ * <p>
+ * 键：confirmationId / session 索引；编排器在 WAITING_CONFIRM 时按会话找回 PendingAction。
  */
 @Slf4j
 @Component

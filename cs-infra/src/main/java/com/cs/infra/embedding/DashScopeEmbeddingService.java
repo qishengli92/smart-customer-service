@@ -16,7 +16,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * DashScope Embedding（OpenAI 兼容 /embeddings）
+ * DashScope Embedding（OpenAI 兼容 {@code /embeddings}）：知识入库与长期记忆向量化入口。
+ * <p>
+ * 被 {@code KnowledgeIngestService} / {@code LongTermMemoryManager} 调用，再写入 Milvus。
  */
 @Slf4j
 @Service

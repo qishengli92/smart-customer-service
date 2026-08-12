@@ -5,7 +5,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * Milvus 向量数据库配置（绑定 cs.milvus）
+ * Milvus 连接与 collection 配置（{@code cs.milvus}），供知识库 / 长期记忆共用。
  */
 @Data
 @Component

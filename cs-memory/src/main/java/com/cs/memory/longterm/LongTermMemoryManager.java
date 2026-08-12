@@ -9,10 +9,9 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * 长期记忆管理器 - 基于 Milvus 向量数据库
+ * 跨会话长期记忆（Milvus）：用户画像 / 偏好 / 交互摘要的向量存储与检索。
  * <p>
- * 存储跨会话的用户画像、历史偏好、售后记录等，
- * 支持语义相似度检索。
+ * 供 {@link com.cs.memory.hook.CustomerMemoryHook} 使用；对齐废弃的 AS {@code LongTermMemory} 能力。
  */
 @Slf4j
 @Component

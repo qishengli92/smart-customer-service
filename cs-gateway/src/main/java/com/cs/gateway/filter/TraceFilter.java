@@ -11,7 +11,10 @@ import reactor.core.publisher.Mono;
 import reactor.util.context.Context;
 
 /**
- * 请求追踪 + Reactor Context 注入租户/用户（禁止 ThreadLocal）
+ * 接入层请求追踪：解析 X-Request-Id / X-Tenant-Id / X-User-Id，写入 Reactor Context。
+ * <p>
+ * WebFlux 禁止依赖 ThreadLocal 跨线程；编排层在 boundedElastic 上另用
+ * {@link com.cs.infra.observability.TraceContext}，二者职责不同勿混用。
  */
 @Slf4j
 @Component

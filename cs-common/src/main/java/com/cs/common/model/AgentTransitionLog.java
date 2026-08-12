@@ -8,7 +8,7 @@ import lombok.NoArgsConstructor;
 import java.time.Instant;
 
 /**
- * Agent 切换审计
+ * Agent 切换审计（from→to / reason），编排器 sticky 与路由切换时可记录。
  */
 @Data
 @Builder

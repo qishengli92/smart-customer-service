@@ -6,7 +6,9 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * SSE 流式响应事件
+ * 编排 → 前端 SSE 事件协议（token / agent_start / confirmation / error / done 等）。
+ * <p>
+ * 由 {@code SupervisorOrchestrator} 产出，{@code ChatController} 映射为 ServerSentEvent。
  */
 @Data
 @Builder

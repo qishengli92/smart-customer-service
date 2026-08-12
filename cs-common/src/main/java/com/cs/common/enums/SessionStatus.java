@@ -1,7 +1,9 @@
 package com.cs.common.enums;
 
 /**
- * 会话状态枚举
+ * 会话状态机：ACTIVE → WAITING_CONFIRM / QUEUED / HUMAN_ACTIVE → CLOSED 等。
+ * <p>
+ * 由编排器与 HandoffController 共同推进，驱动 sticky 与确认续跑分支。
  */
 public enum SessionStatus {
 

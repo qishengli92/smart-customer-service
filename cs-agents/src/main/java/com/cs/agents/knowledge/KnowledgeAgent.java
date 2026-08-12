@@ -14,7 +14,10 @@ import org.springframework.stereotype.Component;
 import java.time.Duration;
 
 /**
- * 知识问答 Agent —— RAG 检索 + AgentScope {@link ReActAgent}
+ * 知识问答 Agent —— 应用层 RAG + AgentScope {@link ReActAgent}。
+ * <p>
+ * RAG 使用自研 {@link KnowledgeRAGHook}（对齐废弃的 GenericRAGHook 行为），
+ * 检索结果作为 prompt「参考信息」传入，不走 AgentScope 已废弃的 {@code .knowledge(...)}。
  */
 @Slf4j
 @Component
@@ -51,6 +54,7 @@ public class KnowledgeAgent {
         log.info("KnowledgeAgent handling: {}",
                 userMessage.substring(0, Math.min(50, userMessage.length())));
 
+        // 编排器已注入则复用；否则本 Agent 自行检索（与 GenericRAGHook 注入等价）
         String knowledgeContext = (context != null && !context.isBlank()
                 && !context.contains("未检索到"))
                 ? context

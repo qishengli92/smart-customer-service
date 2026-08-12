@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 import java.util.Map;
 
 /**
- * 路由决策模型 - Router Agent 输出的结构化结果
+ * Router → Supervisor 契约：意图、置信度、理由；驱动 sticky 与领域 Agent 派发。
  */
 @Data
 @Builder

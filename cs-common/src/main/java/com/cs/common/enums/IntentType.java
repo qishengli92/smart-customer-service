@@ -1,7 +1,9 @@
 package com.cs.common.enums;
 
 /**
- * 用户意图枚举
+ * 用户意图枚举 → 领域 Agent 派发键（code 写入 session.activeAgent）。
+ * <p>
+ * MVP 路由裁剪见 {@code RouterAgent}：PRE_SALES→KNOWLEDGE，COMPLAINT→HUMAN_SERVICE。
  */
 public enum IntentType {
 

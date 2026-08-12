@@ -20,7 +20,9 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 人工转接工具 + 交接单存储（Redis + PostgreSQL）
+ * 人工转接工具兼交接单存储（Redis 热队列 + PostgreSQL 审计）。
+ * <p>
+ * 供 {@code HumanCollabAgent} / 编排器入队，{@code HandoffController} 坐席接单结单。
  */
 @Slf4j
 @Component

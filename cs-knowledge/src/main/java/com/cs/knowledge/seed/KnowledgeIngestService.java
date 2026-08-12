@@ -12,7 +12,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 将种子 FAQ 向量化并写入 Milvus collection {@code cs_faq}。
+ * FAQ 种子入库流水线：种子文本 → DashScope Embedding → Milvus {@code cs_faq}。
+ * <p>
+ * 供启动 Runner 与运维 {@code KnowledgeController} 触发。
  */
 @Slf4j
 @Service

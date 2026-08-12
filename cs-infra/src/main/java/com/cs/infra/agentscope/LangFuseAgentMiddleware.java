@@ -28,10 +28,12 @@ import java.util.Map;
 import java.util.function.Function;
 
 /**
- * AgentScope Middleware：从 onModelCall / onAgent 提取模型名与 Token，写入 LangFuse Generation。
+ * AgentScope 2.0 Middleware：从 onModelCall / onAgent 提取模型名与 Token，写入 LangFuse Generation。
  * <p>
  * 替代已废弃的 {@code Hook} / {@code PostCallEvent} / {@code PostReasoningEvent}。
  * RuntimeContext 由框架注入，避免仅依赖 ThreadLocal 在 Reactor 线程丢 session。
+ * <p>
+ * 注册方式：{@code ReActAgent.builder().middleware(this)}（勿再用 {@code .hook(...)}）。
  */
 @Slf4j
 @Component

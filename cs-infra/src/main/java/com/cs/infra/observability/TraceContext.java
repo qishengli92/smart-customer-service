@@ -1,7 +1,10 @@
 package com.cs.infra.observability;
 
 /**
- * 当前请求的追踪上下文（boundedElastic 线程内传递 sessionId / userId）
+ * 编排线程内追踪上下文（ThreadLocal：sessionId / userId / parentSpanId）。
+ * <p>
+ * 仅在 {@code boundedElastic} 同步管道使用；WebFlux 链路用 Reactor Context（见 TraceFilter）。
+ * 请求结束必须 {@link #clear()}，避免线程池泄漏。
  */
 public final class TraceContext {
 

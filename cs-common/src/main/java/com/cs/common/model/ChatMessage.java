@@ -10,7 +10,7 @@ import java.time.Instant;
 import java.util.Map;
 
 /**
- * 聊天消息模型
+ * 会话消息领域模型（role / content / agentName）；短记忆与 PG 消息表共用。
  */
 @Data
 @Builder

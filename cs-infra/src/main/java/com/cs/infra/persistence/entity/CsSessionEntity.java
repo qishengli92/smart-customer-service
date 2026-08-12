@@ -14,6 +14,9 @@ import org.hibernate.type.SqlTypes;
 import java.time.Instant;
 import java.util.Map;
 
+/**
+ * PG 表 {@code cs_session}：会话冷存储，映射领域 {@link com.cs.common.model.ChatSession}。
+ */
 @Data
 @Builder
 @NoArgsConstructor

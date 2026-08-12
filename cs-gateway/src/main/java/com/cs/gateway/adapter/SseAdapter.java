@@ -8,10 +8,9 @@ import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
 /**
- * SSE 适配器
+ * {@link StreamEvent} → HTTP SSE 协议适配（EventSource 可直接消费）。
  * <p>
- * 将内部 StreamEvent 适配为 HTTP SSE 协议格式，
- * 前端可直接使用 EventSource API 接收。
+ * 当前 ChatController 也可自行 {@code map}；本类供复用或非 Controller 推流场景。
  */
 @Slf4j
 @Component

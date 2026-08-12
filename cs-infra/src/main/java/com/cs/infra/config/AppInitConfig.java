@@ -5,9 +5,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * 应用初始化配置
- * <p>
- * 系统启动后的初始化操作：Milvus Collection 创建、知识库预热等。
+ * 启动期基础设施初始化（如 Milvus collection 就绪检查）；与 KnowledgeSeedRunner 配合。
  */
 @Configuration
 public class AppInitConfig {

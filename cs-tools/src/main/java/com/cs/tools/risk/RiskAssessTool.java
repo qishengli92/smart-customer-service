@@ -11,7 +11,9 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 风险评估工具
+ * 退款等写操作前的风险评估，结果输入 {@link PermissionGate}。
+ * <p>
+ * MVP：金额阈值 + 同用户短时多次退款计数；生产可换外部风控服务。
  */
 @Slf4j
 @Component

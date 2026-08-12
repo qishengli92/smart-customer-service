@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * LangFuse Trace 模型 - 对应一次完整的用户会话交互
+ * LangFuse Trace 根：一次用户回合（含其子 Span/Generation）。
  */
 @Data
 @Builder

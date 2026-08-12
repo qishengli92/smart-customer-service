@@ -7,10 +7,9 @@ import org.springframework.stereotype.Component;
 import java.util.*;
 
 /**
- * 产品查询工具
+ * 产品查询工具（Mock）：售前场景用；注释中的 {@code @Tool} 为规划接入方式。
  * <p>
- * 在 AgentScope Java 中通过 @Tool 注解注册为 LLM 可调用的工具。
- * 当前版本使用 Mock 数据，后续接入真实产品中心 API。
+ * 当前 PreSalesAgent 为直接 Java 调用，尚未注册进 ReAct Toolkit。
  */
 @Slf4j
 @Component

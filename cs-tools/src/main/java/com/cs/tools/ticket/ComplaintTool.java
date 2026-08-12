@@ -9,7 +9,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * 投诉工单工具
+ * 投诉工单工具（内存 Mock）：供 ComplaintAgent 建单/升级。
+ * <p>
+ * MVP 未挂 AgentScope Toolkit；高严重度由 Agent 侧触发 escalate。
  */
 @Slf4j
 @Component

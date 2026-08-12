@@ -5,7 +5,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * LangFuse 配置属性
+ * LangFuse 连接配置（{@code cs.observability.langfuse}：host / publicKey / secretKey / enabled）。
  */
 @Data
 @Component

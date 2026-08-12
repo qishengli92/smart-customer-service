@@ -14,6 +14,9 @@ import org.hibernate.type.SqlTypes;
 import java.time.Instant;
 import java.util.Map;
 
+/**
+ * PG 表 {@code cs_handoff_record}：人工交接单冷存储，与 Redis 热队列互补。
+ */
 @Data
 @Builder
 @NoArgsConstructor

@@ -11,7 +11,9 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.Map;
 
 /**
- * 知识库管理：手动触发种子 FAQ 写入 Milvus。
+ * 知识库运维入口：手动触发 FAQ 种子向量化写入 Milvus。
+ * <p>
+ * 与启动期 {@code KnowledgeSeedRunner} 互补；日常检索走 {@code KnowledgeRAGHook}。
  */
 @Slf4j
 @RestController

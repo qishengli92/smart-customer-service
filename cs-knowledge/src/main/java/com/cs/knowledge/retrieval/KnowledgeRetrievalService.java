@@ -10,7 +10,9 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 /**
- * 知识检索：仅通过 Milvus 向量检索。
+ * RAG 检索门面：用户问句 → Embedding → Milvus 相似度检索 → 格式化上下文。
+ * <p>
+ * 供 {@link com.cs.knowledge.hook.KnowledgeRAGHook} 调用；不依赖 AgentScope 废弃 RAG 包。
  */
 @Slf4j
 @Service

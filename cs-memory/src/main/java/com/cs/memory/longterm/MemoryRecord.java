@@ -9,7 +9,7 @@ import java.time.Instant;
 import java.util.Map;
 
 /**
- * 记忆记录 - 存储在 Milvus 中的长期记忆条目
+ * 长期记忆条目（Milvus 文档侧领域模型：userId / category / content / embedding）。
  */
 @Data
 @Builder

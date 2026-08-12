@@ -43,7 +43,19 @@ import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * Supervisor 编排器（MVP）：状态机 + sticky + CONFIRM 续跑 + PG 落库 + RAG
+ * Supervisor 编排中枢（MVP）：单轮用户消息的完整控制面。
+ * <p>
+ * <b>主链路</b>：短记忆落库 → sticky/CONFIRM 状态机 → {@link RouterAgent} 意图 →
+ * 应用层记忆/RAG 注入 → 领域 Agent（多为 AgentScope {@code ReActAgent}）→
+ * SSE {@link StreamEvent} → LangFuse Trace + PG 审计。
+ * <p>
+ * <b>关键设计</b>：
+ * <ul>
+ *   <li>Memory/RAG 由编排器显式调用（对齐 AS 废弃 Hook 能力，不挂到 ReActAgent）</li>
+ *   <li>写操作 CONFIRM：{@link PendingActionStore} + {@link ConfirmedToolExecutor}，不恢复 ReAct</li>
+ *   <li>sticky：空闲 {@link #STICKY_IDLE} 内优先沿用 {@code session.activeAgent}</li>
+ *   <li>阻塞 I/O（Agent/JDBC）在 {@code boundedElastic}，Sink 保证 SSE 订阅前不丢事件</li>
+ * </ul>
  */
 @Slf4j
 @Service
@@ -60,7 +72,9 @@ public class SupervisorOrchestrator {
     private final ChitChatAgent chitChatAgent;
 
     private final ShortTermMemoryManager shortTermMemory;
+    /** 应用层长期记忆（对应 AgentScope 废弃的 StaticLongTermMemoryHook 能力，自管实现） */
     private final CustomerMemoryHook memoryHook;
+    /** 应用层 RAG（对应 AgentScope 废弃的 GenericRAGHook 能力，自管实现） */
     private final KnowledgeRAGHook knowledgeRAGHook;
     private final LangFuseTracer tracer;
     private final PendingActionStore pendingActionStore;
@@ -166,6 +180,7 @@ public class SupervisorOrchestrator {
             session.touch();
             persistence.upsertSession(session);
 
+            // 推理前注入：长期记忆 +（知识意图时）RAG，对齐 AS Hook 的 PreCall/PreReasoning 时机
             String memoryContext = memoryHook.beforeReasoning(session.getUserId(), userMessage);
             String ragContext = intent == IntentType.KNOWLEDGE
                     ? knowledgeRAGHook.beforeReasoning(userMessage, 5) : "";
@@ -200,6 +215,7 @@ public class SupervisorOrchestrator {
             ChatMessage assistant = ChatMessage.assistantMsg(sessionId, agentResponse, intent.getCode());
             shortTermMemory.addMessage(sessionId, assistant);
             persistence.saveMessage(assistant);
+            // 回复后落长期记忆，对齐 AS StaticLongTermMemoryHook 的 PostCall/record
             memoryHook.afterResponse(session.getUserId(), agentResponse, intent.getCode());
             sink.tryEmitNext(StreamEvent.agentStart(intent.getCode()));
             streamResponse(sink, agentResponse, intent.getCode(), sessionId);
@@ -268,6 +284,7 @@ public class SupervisorOrchestrator {
         session.setActiveAgent(intent.getCode());
         session.touch();
         persistence.upsertSession(session);
+        // 取消确认后续跑：同样先注入记忆 / RAG 再派发
         String memoryContext = memoryHook.beforeReasoning(session.getUserId(), userMessage);
         String ragContext = intent == IntentType.KNOWLEDGE
                 ? knowledgeRAGHook.beforeReasoning(userMessage, 5) : "";

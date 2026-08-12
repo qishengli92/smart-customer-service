@@ -32,7 +32,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * FAQ 知识库 Milvus 读写：建表、入库、向量检索。
+ * FAQ 知识库 Milvus 读写：建表、upsert、向量检索（collection 如 {@code cs_faq}）。
  */
 @Slf4j
 @Service

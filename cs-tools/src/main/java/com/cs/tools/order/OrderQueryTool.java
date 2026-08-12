@@ -10,7 +10,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * 订单查询工具（AgentScope {@link Tool} 注册，供 ReActAgent Toolkit 调用）
+ * 订单查询/改址工具：AgentScope {@code @Tool}，由 {@code OrderAgent} 的 Toolkit 注册。
+ * <p>
+ * 当前为进程内 Mock 订单库；生产应替换为订单中心 API，保持方法签名供 LLM 调用。
  */
 @Slf4j
 @Component

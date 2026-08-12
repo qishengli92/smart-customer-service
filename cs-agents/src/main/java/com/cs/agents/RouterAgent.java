@@ -9,9 +9,11 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * 轻量意图路由（MVP：规则优先；不确定时回退 CHITCHAT）。
- * PRE_SALES → KNOWLEDGE；COMPLAINT → HUMAN_SERVICE（MVP 裁剪）。
- * 路由保持规则引擎以保证稳定性；领域回复走 AgentScope ReActAgent。
+ * 意图路由（MVP：规则引擎优先，异常回退 {@link IntentType#CHITCHAT}）。
+ * <p>
+ * 刻意不走 LLM，保证路由稳定可测；领域回复才用 AgentScope {@code ReActAgent}。
+ * MVP 裁剪：{@code PRE_SALES→KNOWLEDGE}，{@code COMPLAINT→HUMAN_SERVICE}。
+ * 输出 {@link RoutingDecision}，由编排器 sticky / 派发消费。
  */
 @Slf4j
 @Component

@@ -1,5 +1,6 @@
 package com.cs.agents.aftersales;
 
+import com.cs.agents.support.AgentMemorySupport;
 import com.cs.common.enums.PermissionMode;
 import com.cs.common.model.AgentHandleResult;
 import com.cs.common.model.OrderInfo;
@@ -8,13 +9,14 @@ import com.cs.common.model.PermissionDecision;
 import com.cs.common.model.RiskAssessResult;
 import com.cs.infra.agentscope.LangFuseAgentMiddleware;
 import com.cs.infra.observability.TraceContext;
+import com.cs.memory.agentscope.MilvusLongTermMemory;
 import com.cs.tools.order.OrderQueryTool;
 import com.cs.tools.permission.PendingActionStore;
 import com.cs.tools.permission.PermissionGate;
 import com.cs.tools.risk.RiskAssessTool;
 import io.agentscope.core.ReActAgent;
-import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.message.Msg;
+import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.extensions.model.dashscope.DashScopeChatModel;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -27,12 +29,13 @@ import java.util.Map;
 /**
  * 售后领域 Agent：写路径由 {@link PermissionGate} 裁决，话术由 AgentScope {@link ReActAgent} 生成。
  * <p>
- * 流程：查单 → 风控 → Gate（AUTO/CONFIRM/DENY）→ 挂起时写 {@link PendingActionStore}；
- * ReAct 不直接执行退款，用户确认后由编排器走 {@code ConfirmedToolExecutor}。
+ * 挂载 AgentStateStore（短期）与 LongTermMemory（长期）。
  */
 @Slf4j
 @Component
 public class AfterSalesAgent {
+
+    private static final String AGENT_NAME = "after_sales";
 
     private static final String SYSTEM_PROMPT = """
             你是售后支持专员。根据系统事实向用户说明退款/退货与确认事项。
@@ -54,18 +57,23 @@ public class AfterSalesAgent {
                            PermissionGate permissionGate,
                            PendingActionStore pendingActionStore,
                            @Qualifier("expertChatModel") DashScopeChatModel chatModel,
-                           LangFuseAgentMiddleware langFuseAgentMiddleware) {
+                           LangFuseAgentMiddleware langFuseAgentMiddleware,
+                           AgentStateStore agentStateStore,
+                           MilvusLongTermMemory longTermMemory) {
         this.orderQueryTool = orderQueryTool;
         this.riskAssessTool = riskAssessTool;
         this.permissionGate = permissionGate;
         this.pendingActionStore = pendingActionStore;
         this.langFuseAgentMiddleware = langFuseAgentMiddleware;
-        this.agent = ReActAgent.builder()
-                .name("after_sales")
-                .sysPrompt(SYSTEM_PROMPT)
-                .model(chatModel)
-                .middleware(langFuseAgentMiddleware)
-                .maxIters(3)
+        this.agent = AgentMemorySupport.applyMemory(
+                        ReActAgent.builder()
+                                .name(AGENT_NAME)
+                                .sysPrompt(SYSTEM_PROMPT)
+                                .model(chatModel)
+                                .middleware(langFuseAgentMiddleware)
+                                .maxIters(3),
+                        agentStateStore,
+                        longTermMemory)
                 .build();
     }
 
@@ -205,10 +213,9 @@ public class AfterSalesAgent {
     private String llm(String userMessage, String facts, String fallback) {
         try {
             String prompt = "参考信息：\n" + facts + "\n\n用户消息：\n" + userMessage;
-            Msg reply = agent.call(prompt, RuntimeContext.builder()
-                    .sessionId(TraceContext.getSessionId())
-                    .userId(TraceContext.getUserId())
-                    .build()).block(Duration.ofSeconds(90));
+            Msg reply = agent.call(prompt, AgentMemorySupport.runtimeContext(
+                    TraceContext.getSessionId(), TraceContext.getUserId(), AGENT_NAME))
+                    .block(Duration.ofSeconds(90));
             langFuseAgentMiddleware.afterAgentCall(agent, reply);
             String text = reply != null ? reply.getTextContent() : null;
             return (text != null && !text.isBlank()) ? text : fallback;

@@ -45,4 +45,9 @@ public class MilvusProperties {
     public String faqCollectionName() {
         return collectionPrefix + "faq";
     }
+
+    /** 长期记忆向量 collection */
+    public String memoryCollectionName() {
+        return collectionPrefix + "memory";
+    }
 }

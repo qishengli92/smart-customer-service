@@ -17,10 +17,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 
 /**
- * 会话内短期记忆：本地滑动窗口 + Redis 备份。
+ * 会话内短期消息缓冲：本地滑动窗口 + Redis（编排审计 / 交接摘要）。
  * <p>
- * 概念对齐 AgentScope 会话 Memory / {@code AgentState} 上下文，应用层自管实现；
- * 编排器每轮读写，与长期记忆（Milvus）分离。
+ * <b>与 AgentScope 的关系</b>：ReActAgent 的多轮对话上下文由原生
+ * {@link io.agentscope.core.state.AgentStateStore} + {@code AgentState.getContext()} 自动管理；
+ * 本类不替代 StateStore，仅服务编排器落库与 handoff 摘要等旁路需求。
  */
 @Slf4j
 @Component

@@ -1,13 +1,15 @@
 package com.cs.agents.human;
 
+import com.cs.agents.support.AgentMemorySupport;
 import com.cs.common.model.AgentHandleResult;
 import com.cs.common.model.HandoffRecord;
 import com.cs.infra.agentscope.LangFuseAgentMiddleware;
 import com.cs.infra.observability.TraceContext;
+import com.cs.memory.agentscope.MilvusLongTermMemory;
 import com.cs.tools.handoff.HumanHandoffTool;
 import io.agentscope.core.ReActAgent;
-import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.message.Msg;
+import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.extensions.model.dashscope.DashScopeChatModel;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -19,11 +21,13 @@ import java.util.Map;
 /**
  * 人工协作 Agent：{@link HumanHandoffTool} 负责排队事实，ReAct 只生成安抚话术。
  * <p>
- * 返回 {@link AgentHandleResult}（含 handoff 标记），编排器据此切 {@code HUMAN_*} 状态。
+ * 挂载 AgentStateStore（短期）与 LongTermMemory（长期）。
  */
 @Slf4j
 @Component
 public class HumanCollabAgent {
+
+    private static final String AGENT_NAME = "human_service";
 
     private static final String SYSTEM_PROMPT = """
             你是智能客服。用户要求转人工，请安抚并说明已进入排队。
@@ -36,15 +40,20 @@ public class HumanCollabAgent {
 
     public HumanCollabAgent(HumanHandoffTool humanHandoffTool,
                             @Qualifier("expertChatModel") DashScopeChatModel chatModel,
-                            LangFuseAgentMiddleware langFuseAgentMiddleware) {
+                            LangFuseAgentMiddleware langFuseAgentMiddleware,
+                            AgentStateStore agentStateStore,
+                            MilvusLongTermMemory longTermMemory) {
         this.humanHandoffTool = humanHandoffTool;
         this.langFuseAgentMiddleware = langFuseAgentMiddleware;
-        this.agent = ReActAgent.builder()
-                .name("human_service")
-                .sysPrompt(SYSTEM_PROMPT)
-                .model(chatModel)
-                .middleware(langFuseAgentMiddleware)
-                .maxIters(3)
+        this.agent = AgentMemorySupport.applyMemory(
+                        ReActAgent.builder()
+                                .name(AGENT_NAME)
+                                .sysPrompt(SYSTEM_PROMPT)
+                                .model(chatModel)
+                                .middleware(langFuseAgentMiddleware)
+                                .maxIters(3),
+                        agentStateStore,
+                        longTermMemory)
                 .build();
     }
 
@@ -88,10 +97,9 @@ public class HumanCollabAgent {
         String reply = fallback;
         try {
             Msg msg = agent.call("参考信息：\n" + facts + "\n\n用户消息：\n" + userMessage,
-                    RuntimeContext.builder()
-                            .sessionId(TraceContext.getSessionId())
-                            .userId(TraceContext.getUserId())
-                            .build()).block(Duration.ofSeconds(90));
+                    AgentMemorySupport.runtimeContext(
+                            TraceContext.getSessionId(), TraceContext.getUserId(), AGENT_NAME))
+                    .block(Duration.ofSeconds(90));
             langFuseAgentMiddleware.afterAgentCall(agent, msg);
             if (msg != null && msg.getTextContent() != null && !msg.getTextContent().isBlank()) {
                 reply = msg.getTextContent();

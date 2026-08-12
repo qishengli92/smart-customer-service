@@ -1,10 +1,12 @@
 package com.cs.agents.chitchat;
 
+import com.cs.agents.support.AgentMemorySupport;
 import com.cs.infra.agentscope.LangFuseAgentMiddleware;
 import com.cs.infra.observability.TraceContext;
+import com.cs.memory.agentscope.MilvusLongTermMemory;
 import io.agentscope.core.ReActAgent;
-import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.message.Msg;
+import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.extensions.model.dashscope.DashScopeChatModel;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -15,11 +17,13 @@ import java.time.Duration;
 /**
  * 闲聊 / 兜底 Agent：AgentScope {@link ReActAgent} + chitchat 档低成本模型。
  * <p>
- * 路由失败或低置信时落此地；无 Toolkit，仅生成引导话术。
+ * 挂载 AgentStateStore（短期）与 LongTermMemory（长期）。
  */
 @Slf4j
 @Component
 public class ChitChatAgent {
+
+    private static final String AGENT_NAME = "chitchat";
 
     private static final String SYSTEM_PROMPT = """
             你是友好的智能客服助手。处理日常闲聊、打招呼、简单引导。
@@ -39,14 +43,19 @@ public class ChitChatAgent {
     private final LangFuseAgentMiddleware langFuseAgentMiddleware;
 
     public ChitChatAgent(@Qualifier("chitchatChatModel") DashScopeChatModel chatModel,
-                         LangFuseAgentMiddleware langFuseAgentMiddleware) {
+                         LangFuseAgentMiddleware langFuseAgentMiddleware,
+                         AgentStateStore agentStateStore,
+                         MilvusLongTermMemory longTermMemory) {
         this.langFuseAgentMiddleware = langFuseAgentMiddleware;
-        this.agent = ReActAgent.builder()
-                .name("chitchat")
-                .sysPrompt(SYSTEM_PROMPT)
-                .model(chatModel)
-                .middleware(langFuseAgentMiddleware)
-                .maxIters(3)
+        this.agent = AgentMemorySupport.applyMemory(
+                        ReActAgent.builder()
+                                .name(AGENT_NAME)
+                                .sysPrompt(SYSTEM_PROMPT)
+                                .model(chatModel)
+                                .middleware(langFuseAgentMiddleware)
+                                .maxIters(3),
+                        agentStateStore,
+                        longTermMemory)
                 .build();
     }
 
@@ -56,7 +65,9 @@ public class ChitChatAgent {
             String prompt = (context != null && !context.isBlank())
                     ? "参考信息：\n" + context + "\n\n用户消息：\n" + userMessage
                     : userMessage;
-            Msg reply = agent.call(prompt, runtimeContext()).block(Duration.ofSeconds(90));
+            Msg reply = agent.call(prompt, AgentMemorySupport.runtimeContext(
+                    TraceContext.getSessionId(), TraceContext.getUserId(), AGENT_NAME))
+                    .block(Duration.ofSeconds(90));
             langFuseAgentMiddleware.afterAgentCall(agent, reply);
             String text = reply != null ? reply.getTextContent() : null;
             return (text != null && !text.isBlank()) ? text : FALLBACK;
@@ -64,12 +75,5 @@ public class ChitChatAgent {
             log.warn("ChitChatAgent ReActAgent failed: {}", e.getMessage());
             return FALLBACK;
         }
-    }
-
-    private RuntimeContext runtimeContext() {
-        return RuntimeContext.builder()
-                .sessionId(TraceContext.getSessionId())
-                .userId(TraceContext.getUserId())
-                .build();
     }
 }

@@ -1,11 +1,13 @@
 package com.cs.agents.knowledge;
 
+import com.cs.agents.support.AgentMemorySupport;
 import com.cs.infra.agentscope.LangFuseAgentMiddleware;
 import com.cs.infra.observability.TraceContext;
 import com.cs.knowledge.hook.KnowledgeRAGHook;
+import com.cs.memory.agentscope.MilvusLongTermMemory;
 import io.agentscope.core.ReActAgent;
-import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.message.Msg;
+import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.extensions.model.dashscope.DashScopeChatModel;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -16,12 +18,13 @@ import java.time.Duration;
 /**
  * 知识问答 Agent —— 应用层 RAG + AgentScope {@link ReActAgent}。
  * <p>
- * RAG 使用自研 {@link KnowledgeRAGHook}（对齐废弃的 GenericRAGHook 行为），
- * 检索结果作为 prompt「参考信息」传入，不走 AgentScope 已废弃的 {@code .knowledge(...)}。
+ * RAG 使用自研 {@link KnowledgeRAGHook}；会话短期 / 跨会话长期走 AgentScope 原生记忆组件。
  */
 @Slf4j
 @Component
 public class KnowledgeAgent {
+
+    private static final String AGENT_NAME = "knowledge";
 
     private static final String SYSTEM_PROMPT = """
             你是智能客服知识问答专员。只能依据提供的「参考信息」回答用户问题。
@@ -38,15 +41,20 @@ public class KnowledgeAgent {
 
     public KnowledgeAgent(KnowledgeRAGHook ragHook,
                           @Qualifier("expertChatModel") DashScopeChatModel chatModel,
-                          LangFuseAgentMiddleware langFuseAgentMiddleware) {
+                          LangFuseAgentMiddleware langFuseAgentMiddleware,
+                          AgentStateStore agentStateStore,
+                          MilvusLongTermMemory longTermMemory) {
         this.ragHook = ragHook;
         this.langFuseAgentMiddleware = langFuseAgentMiddleware;
-        this.agent = ReActAgent.builder()
-                .name("knowledge")
-                .sysPrompt(SYSTEM_PROMPT)
-                .model(chatModel)
-                .middleware(langFuseAgentMiddleware)
-                .maxIters(3)
+        this.agent = AgentMemorySupport.applyMemory(
+                        ReActAgent.builder()
+                                .name(AGENT_NAME)
+                                .sysPrompt(SYSTEM_PROMPT)
+                                .model(chatModel)
+                                .middleware(langFuseAgentMiddleware)
+                                .maxIters(3),
+                        agentStateStore,
+                        longTermMemory)
                 .build();
     }
 
@@ -54,7 +62,6 @@ public class KnowledgeAgent {
         log.info("KnowledgeAgent handling: {}",
                 userMessage.substring(0, Math.min(50, userMessage.length())));
 
-        // 编排器已注入则复用；否则本 Agent 自行检索（与 GenericRAGHook 注入等价）
         String knowledgeContext = (context != null && !context.isBlank()
                 && !context.contains("未检索到"))
                 ? context
@@ -78,10 +85,9 @@ public class KnowledgeAgent {
 
         try {
             String prompt = "参考信息：\n" + rag + "\n\n用户问题：\n" + userMessage;
-            Msg reply = agent.call(prompt, RuntimeContext.builder()
-                    .sessionId(TraceContext.getSessionId())
-                    .userId(TraceContext.getUserId())
-                    .build()).block(Duration.ofSeconds(90));
+            Msg reply = agent.call(prompt, AgentMemorySupport.runtimeContext(
+                    TraceContext.getSessionId(), TraceContext.getUserId(), AGENT_NAME))
+                    .block(Duration.ofSeconds(90));
             langFuseAgentMiddleware.afterAgentCall(agent, reply);
             String text = reply != null ? reply.getTextContent() : null;
             return (text != null && !text.isBlank()) ? text : fallback;

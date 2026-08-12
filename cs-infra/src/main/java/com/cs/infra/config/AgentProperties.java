@@ -41,4 +41,9 @@ public class AgentProperties {
      * 赔偿风控阈值（元）
      */
     private double compensationThreshold = 1000;
+
+    /**
+     * 是否启用 AgentScope 长期记忆（LongTermMemory STATIC_CONTROL）
+     */
+    private boolean longTermMemoryEnabled = true;
 }

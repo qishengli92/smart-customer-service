@@ -22,7 +22,6 @@ import com.cs.infra.observability.LangFuseTracer;
 import com.cs.infra.observability.TraceContext;
 import com.cs.infra.persistence.ConversationPersistenceService;
 import com.cs.knowledge.hook.KnowledgeRAGHook;
-import com.cs.memory.hook.CustomerMemoryHook;
 import com.cs.memory.shortterm.ShortTermMemoryManager;
 import com.cs.tools.handoff.HumanHandoffTool;
 import com.cs.tools.permission.ConfirmedToolExecutor;
@@ -51,7 +50,9 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * <p>
  * <b>关键设计</b>：
  * <ul>
- *   <li>Memory/RAG 由编排器显式调用（对齐 AS 废弃 Hook 能力，不挂到 ReActAgent）</li>
+ *   <li>短期会话上下文：各 ReActAgent 的 {@code AgentStateStore}（同 session 自动续聊）</li>
+ *   <li>长期记忆：各 ReActAgent 原生 {@code LongTermMemory}（STATIC_CONTROL）</li>
+ *   <li>RAG 由编排器显式调用（对齐 AS 废弃 GenericRAGHook，不挂到 ReActAgent）</li>
  *   <li>写操作 CONFIRM：{@link PendingActionStore} + {@link ConfirmedToolExecutor}，不恢复 ReAct</li>
  *   <li>sticky：空闲 {@link #STICKY_IDLE} 内优先沿用 {@code session.activeAgent}</li>
  *   <li>阻塞 I/O（Agent/JDBC）在 {@code boundedElastic}，Sink 保证 SSE 订阅前不丢事件</li>
@@ -72,9 +73,10 @@ public class SupervisorOrchestrator {
     private final ChitChatAgent chitChatAgent;
 
     private final ShortTermMemoryManager shortTermMemory;
-    /** 应用层长期记忆（对应 AgentScope 废弃的 StaticLongTermMemoryHook 能力，自管实现） */
-    private final CustomerMemoryHook memoryHook;
-    /** 应用层 RAG（对应 AgentScope 废弃的 GenericRAGHook 能力，自管实现） */
+    /**
+     * 编排层审计用短期消息缓冲（Redis）；Agent 会话上下文由 AgentScope {@code AgentStateStore} 负责。
+     * 长期记忆已挂到各 ReActAgent 的原生 {@code LongTermMemory}，此处不再手动 before/after。
+     */
     private final KnowledgeRAGHook knowledgeRAGHook;
     private final LangFuseTracer tracer;
     private final PendingActionStore pendingActionStore;
@@ -180,12 +182,11 @@ public class SupervisorOrchestrator {
             session.touch();
             persistence.upsertSession(session);
 
-            // 推理前注入：长期记忆 +（知识意图时）RAG，对齐 AS Hook 的 PreCall/PreReasoning 时机
-            String memoryContext = memoryHook.beforeReasoning(session.getUserId(), userMessage);
+            // RAG 仅知识意图；长期记忆由 AgentScope LongTermMemory 在 Agent 内自动注入
             String ragContext = intent == IntentType.KNOWLEDGE
                     ? knowledgeRAGHook.beforeReasoning(userMessage, 5) : "";
 
-            AgentHandleResult result = dispatchToAgent(intent, userMessage, memoryContext, ragContext, session);
+            AgentHandleResult result = dispatchToAgent(intent, userMessage, ragContext, session);
 
             if (result.hasPending()) {
                 session.setStatus(SessionStatus.WAITING_CONFIRM);
@@ -207,7 +208,8 @@ public class SupervisorOrchestrator {
             }
 
             if (result.isHandoffRequested()) {
-                applyHandoff(session, userMessage, memoryContext, result, sink, intent);
+                applyHandoff(session, userMessage,
+                        shortTermMemory.getRecentContext(sessionId, 3), result, sink, intent);
                 return;
             }
 
@@ -215,8 +217,7 @@ public class SupervisorOrchestrator {
             ChatMessage assistant = ChatMessage.assistantMsg(sessionId, agentResponse, intent.getCode());
             shortTermMemory.addMessage(sessionId, assistant);
             persistence.saveMessage(assistant);
-            // 回复后落长期记忆，对齐 AS StaticLongTermMemoryHook 的 PostCall/record
-            memoryHook.afterResponse(session.getUserId(), agentResponse, intent.getCode());
+            // 长期记忆由 Agent 内 LongTermMemory.record 异步写入，无需编排器再调
             sink.tryEmitNext(StreamEvent.agentStart(intent.getCode()));
             streamResponse(sink, agentResponse, intent.getCode(), sessionId);
             tracer.endTrace(sessionId, Map.of("response", agentResponse, "intent", intent.getCode()));
@@ -284,11 +285,10 @@ public class SupervisorOrchestrator {
         session.setActiveAgent(intent.getCode());
         session.touch();
         persistence.upsertSession(session);
-        // 取消确认后续跑：同样先注入记忆 / RAG 再派发
-        String memoryContext = memoryHook.beforeReasoning(session.getUserId(), userMessage);
+        // 取消确认后续跑：RAG（如需）后派发；记忆由 AgentScope 组件负责
         String ragContext = intent == IntentType.KNOWLEDGE
                 ? knowledgeRAGHook.beforeReasoning(userMessage, 5) : "";
-        AgentHandleResult result = dispatchToAgent(intent, userMessage, memoryContext, ragContext, session);
+        AgentHandleResult result = dispatchToAgent(intent, userMessage, ragContext, session);
         if (result.hasPending()) {
             session.setStatus(SessionStatus.WAITING_CONFIRM);
             persistence.upsertSession(session);
@@ -303,7 +303,8 @@ public class SupervisorOrchestrator {
             return;
         }
         if (result.isHandoffRequested()) {
-            applyHandoff(session, userMessage, memoryContext, result, sink, intent);
+            applyHandoff(session, userMessage,
+                    shortTermMemory.getRecentContext(session.getSessionId(), 3), result, sink, intent);
             return;
         }
         String agentResponse = result.getReplyText() != null ? result.getReplyText() : "";
@@ -399,24 +400,24 @@ public class SupervisorOrchestrator {
     }
 
     private AgentHandleResult dispatchToAgent(IntentType intent, String userMessage,
-                                              String memoryContext, String ragContext,
-                                              ChatSession session) {
+                                              String ragContext, ChatSession session) {
         String sessionId = session.getSessionId();
         String spanId = tracer.startAgentSpan(sessionId, intent.getCode(),
                 Map.of("message", userMessage), null);
         TraceContext.setParentSpanId(spanId);
         try {
-            // MVP：仅启用 Order / AfterSales / Knowledge / Human / ChitChat
+            // 业务补充上下文可为空；跨轮对话与长期记忆由 AgentScope StateStore / LongTermMemory 注入
+            String extra = "";
             AgentHandleResult result = switch (intent) {
-                case ORDER -> AgentHandleResult.text(orderAgent.handle(userMessage, memoryContext));
-                case AFTER_SALES -> afterSalesAgent.handle(userMessage, memoryContext,
+                case ORDER -> AgentHandleResult.text(orderAgent.handle(userMessage, extra));
+                case AFTER_SALES -> afterSalesAgent.handle(userMessage, extra,
                         sessionId, session.getUserId(), session.getTenantId());
                 case KNOWLEDGE, PRE_SALES -> AgentHandleResult.text(
                         knowledgeAgent.handle(userMessage, ragContext));
-                case HUMAN_SERVICE, COMPLAINT -> humanCollabAgent.handle(userMessage, memoryContext,
+                case HUMAN_SERVICE, COMPLAINT -> humanCollabAgent.handle(userMessage, extra,
                         sessionId, session.getUserId(), session.getTenantId());
                 case CHITCHAT, RISK_CONTROL -> AgentHandleResult.text(
-                        chitChatAgent.handle(userMessage, memoryContext));
+                        chitChatAgent.handle(userMessage, extra));
             };
             tracer.endSpan(spanId, Map.of("response",
                     result.getReplyText() != null ? result.getReplyText() : ""), null);

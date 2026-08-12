@@ -1,11 +1,13 @@
 package com.cs.agents.order;
 
+import com.cs.agents.support.AgentMemorySupport;
 import com.cs.infra.agentscope.LangFuseAgentMiddleware;
 import com.cs.infra.observability.TraceContext;
+import com.cs.memory.agentscope.MilvusLongTermMemory;
 import com.cs.tools.order.OrderQueryTool;
 import io.agentscope.core.ReActAgent;
-import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.message.Msg;
+import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.tool.Toolkit;
 import io.agentscope.extensions.model.dashscope.DashScopeChatModel;
 import lombok.extern.slf4j.Slf4j;
@@ -17,12 +19,14 @@ import java.time.Duration;
 /**
  * 订单领域 Agent：AgentScope {@link ReActAgent} + {@link Toolkit}({@link OrderQueryTool})。
  * <p>
- * 使用 expert 档 {@link DashScopeChatModel}，挂载 {@link LangFuseAgentMiddleware}；
- * 工具经 {@code @Tool} 注册，由 ReAct 循环自行调用（查单/改址）。
+ * 短期记忆：{@link AgentStateStore} 自动持久化会话上下文；
+ * 长期记忆：原生 {@code LongTermMemory}（STATIC_CONTROL）。
  */
 @Slf4j
 @Component
 public class OrderAgent {
+
+    private static final String AGENT_NAME = "order";
 
     private static final String SYSTEM_PROMPT = """
             你是订单服务专员。可调用工具查询订单、修改未发货订单地址。
@@ -42,18 +46,23 @@ public class OrderAgent {
 
     public OrderAgent(OrderQueryTool orderQueryTool,
                       @Qualifier("expertChatModel") DashScopeChatModel chatModel,
-                      LangFuseAgentMiddleware langFuseAgentMiddleware) {
+                      LangFuseAgentMiddleware langFuseAgentMiddleware,
+                      AgentStateStore agentStateStore,
+                      MilvusLongTermMemory longTermMemory) {
         this.langFuseAgentMiddleware = langFuseAgentMiddleware;
         Toolkit toolkit = new Toolkit();
         toolkit.registerTool(orderQueryTool);
 
-        this.agent = ReActAgent.builder()
-                .name("order")
-                .sysPrompt(SYSTEM_PROMPT)
-                .model(chatModel)
-                .toolkit(toolkit)
-                .middleware(langFuseAgentMiddleware)
-                .maxIters(6)
+        this.agent = AgentMemorySupport.applyMemory(
+                        ReActAgent.builder()
+                                .name(AGENT_NAME)
+                                .sysPrompt(SYSTEM_PROMPT)
+                                .model(chatModel)
+                                .toolkit(toolkit)
+                                .middleware(langFuseAgentMiddleware)
+                                .maxIters(6),
+                        agentStateStore,
+                        longTermMemory)
                 .build();
     }
 
@@ -63,10 +72,9 @@ public class OrderAgent {
             String prompt = (context != null && !context.isBlank())
                     ? "补充上下文：\n" + context + "\n\n用户消息：\n" + userMessage
                     : userMessage;
-            Msg reply = agent.call(prompt, RuntimeContext.builder()
-                    .sessionId(TraceContext.getSessionId())
-                    .userId(TraceContext.getUserId())
-                    .build()).block(Duration.ofSeconds(120));
+            Msg reply = agent.call(prompt, AgentMemorySupport.runtimeContext(
+                    TraceContext.getSessionId(), TraceContext.getUserId(), AGENT_NAME))
+                    .block(Duration.ofSeconds(120));
             langFuseAgentMiddleware.afterAgentCall(agent, reply);
             String text = reply != null ? reply.getTextContent() : null;
             return (text != null && !text.isBlank()) ? text : FALLBACK;

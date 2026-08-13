@@ -21,8 +21,9 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * LangFuse 可观测门面：编排层 Trace/Span 树 + HTTP ingestion。
  * <p>
- * 与 {@link com.cs.infra.agentscope.LangFuseAgentMiddleware} 分工：本类管会话级 Trace，
- * Middleware 管 ReAct 内 Generation（模型名/Token）；二者共享 sessionId。
+ * 与 {@link com.cs.infra.agentscope.LangFuseAgentMiddleware} /
+ * {@link com.cs.infra.observability.otel.GenAiOtelTracer} 分工：
+ * 本类管会话级 Trace（Track A ingestion）；LLM/Tool 优先走 OTLP GenAI（Track B）。
  */
 @Slf4j
 @Component

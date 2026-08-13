@@ -5,7 +5,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * LangFuse 连接配置（{@code cs.observability.langfuse}：host / publicKey / secretKey / enabled）。
+ * LangFuse 双轨可观测配置（{@code cs.observability.langfuse}）。
+ * <ul>
+ *   <li>Track A · ingestion：编排层 Trace/Span（会话、Router、Agent）</li>
+ *   <li>Track B · OTLP：AgentScope {@code TracerRegistry} 上报 LLM Prompt / Tool（GenAI 语义）</li>
+ * </ul>
  */
 @Data
 @Component
@@ -13,7 +17,7 @@ import org.springframework.stereotype.Component;
 public class LangFuseProperties {
 
     /**
-     * 是否启用
+     * 总开关
      */
     private boolean enabled = true;
 
@@ -28,12 +32,17 @@ public class LangFuseProperties {
     private String secretKey;
 
     /**
-     * LangFuse API 地址
+     * LangFuse API 地址（不含 path）
      */
     private String baseUrl = "https://cloud.langfuse.com";
 
     /**
-     * 发布开关（debug 模式下不发送到远端）
+     * Track A：是否经 /api/public/ingestion 上报业务 Trace
      */
     private boolean flushEnabled = true;
+
+    /**
+     * Track B：是否启用 OTLP GenAI（Prompt / Tool 完整数据）
+     */
+    private boolean otelEnabled = true;
 }

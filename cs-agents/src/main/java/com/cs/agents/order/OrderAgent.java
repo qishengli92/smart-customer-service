@@ -17,10 +17,7 @@ import org.springframework.stereotype.Component;
 import java.time.Duration;
 
 /**
- * 订单领域 Agent：AgentScope {@link ReActAgent} + {@link Toolkit}({@link OrderQueryTool})。
- * <p>
- * 短期记忆：{@link AgentStateStore} 自动持久化会话上下文；
- * 长期记忆：原生 {@code LongTermMemory}（STATIC_CONTROL）。
+ * 订单领域 Agent：AgentScope {@link ReActAgent} + {@link OrderQueryTool}（内部走 MCP 订单服务）。
  */
 @Slf4j
 @Component

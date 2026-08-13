@@ -22,7 +22,8 @@ public class AppInitConfig {
                     ║   智能客服 Agent 系统 MVP-1.0              ║
                     ║   Framework: AgentScope Java 2.0           ║
                     ║   LLM: DashScope (Qwen) · 规则 Router      ║
-                    ║   Observability: LangFuse                   ║
+                    ║   Observability: LangFuse 双轨             ║
+                    ║     A=ingestion编排 · B=OTLP GenAI         ║
                     ║   DB: PostgreSQL + Redis + Milvus FAQ Seed ║
                     ╚══════════════════════════════════════════════╝
                     """);

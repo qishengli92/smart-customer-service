@@ -1,81 +1,59 @@
 package com.cs.tools.order;
 
 import com.cs.common.model.OrderInfo;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.agentscope.core.tool.Tool;
 import io.agentscope.core.tool.ToolParam;
+import io.modelcontextprotocol.spec.McpSchema;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
-import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
- * 订单查询/改址工具：AgentScope {@code @Tool}，由 {@code OrderAgent} 的 Toolkit 注册。
+ * 订单查询/改址工具：对外仍是 AgentScope {@code @Tool}，内部通过 MCP 调用 {@code cs-order-service}。
  * <p>
- * 当前为进程内 Mock 订单库；生产应替换为订单中心 API，保持方法签名供 LLM 调用。
+ * 不直接把长生命周期 MCP client 挂到 Toolkit，避免会话断开后工具永久失效。
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class OrderQueryTool {
 
-    private static final Map<String, OrderInfo> ORDER_DB = new HashMap<>();
+    private static final Pattern JSON_OBJECT = Pattern.compile("\\{[\\s\\S]*}$");
 
-    static {
-        ORDER_DB.put("ORD20260609001", OrderInfo.builder()
-                .orderId("ORD20260609001").userId("U001")
-                .productName("智能手表 Pro").amount(1299.00)
-                .status("DELIVERED").address("北京市海淀区中关村大街1号")
-                .logisticsInfo("已签收，签收人：本人")
-                .createdAt("2026-06-05 14:30:00").updatedAt("2026-06-09 10:15:00")
-                .build());
-        ORDER_DB.put("ORD20260608002", OrderInfo.builder()
-                .orderId("ORD20260608002").userId("U001")
-                .productName("无线降噪耳机").amount(899.00)
-                .status("SHIPPED").address("北京市海淀区中关村大街1号")
-                .logisticsInfo("运输中，已到达北京转运中心")
-                .createdAt("2026-06-08 09:20:00").updatedAt("2026-06-09 08:00:00")
-                .build());
-        ORDER_DB.put("ORD20260607003", OrderInfo.builder()
-                .orderId("ORD20260607003").userId("U002")
-                .productName("便携充电宝 20000mAh").amount(299.00)
-                .status("PENDING").address("上海市浦东新区陆家嘴环路1000号")
-                .logisticsInfo("待发货")
-                .createdAt("2026-06-07 16:45:00").updatedAt("2026-06-07 16:45:00")
-                .build());
-        ORDER_DB.put("ORD20260601001", OrderInfo.builder()
-                .orderId("ORD20260601001").userId("U100001")
-                .productName("智能蓝牙耳机 Pro").amount(299.00)
-                .status("DELIVERED").address("上海市浦东新区张江高科技园区")
-                .logisticsInfo("已签收")
-                .createdAt("2026-06-01 10:00:00").updatedAt("2026-06-03 18:00:00")
-                .build());
-        ORDER_DB.put("ORD20260602001", OrderInfo.builder()
-                .orderId("ORD20260602001").userId("U100001")
-                .productName("轻薄笔记本电脑 AirBook 14").amount(4599.00)
-                .status("SHIPPED").address("上海市浦东新区张江高科技园区")
-                .logisticsInfo("运输中")
-                .createdAt("2026-06-02 11:00:00").updatedAt("2026-06-04 09:00:00")
-                .build());
-        ORDER_DB.put("ORD20260603001", OrderInfo.builder()
-                .orderId("ORD20260603001").userId("U100002")
-                .productName("智能手表 Watch S8").amount(3198.00)
-                .status("PAID").address("北京市海淀区中关村")
-                .logisticsInfo("待发货")
-                .createdAt("2026-06-03 12:00:00").updatedAt("2026-06-03 12:30:00")
-                .build());
-    }
+    private final OrderMcpClient orderMcpClient;
+    private final ObjectMapper objectMapper;
 
     public OrderInfo queryOrder(String orderId) {
-        if (orderId == null) {
+        if (orderId == null || orderId.isBlank()) {
             return null;
         }
-        OrderInfo order = ORDER_DB.get(orderId.toUpperCase());
-        if (order != null) {
-            log.info("Order found: {}", orderId);
-            return order;
+        try {
+            McpSchema.CallToolResult result = orderMcpClient.callTool(
+                    "query_order", Map.of("orderId", orderId));
+            if (Boolean.TRUE.equals(result.isError())) {
+                log.warn("Order not found or MCP error: {}", orderId);
+                return null;
+            }
+            if (result.structuredContent() != null) {
+                return objectMapper.convertValue(result.structuredContent(), OrderInfo.class);
+            }
+            String text = extractText(result);
+            Matcher matcher = JSON_OBJECT.matcher(text.trim());
+            if (matcher.find()) {
+                return objectMapper.readValue(matcher.group(), OrderInfo.class);
+            }
+            log.warn("Unable to parse order JSON from MCP result: {}", orderId);
+            return null;
+        } catch (Exception e) {
+            log.error("MCP query_order failed for {}: {}", orderId, e.getMessage());
+            return null;
         }
-        log.warn("Order not found: {}", orderId);
-        return null;
     }
 
     @Tool(name = "query_order", description = "根据订单号查询订单详情、状态与物流信息。订单号通常以 ORD 开头。")
@@ -97,15 +75,31 @@ public class OrderQueryTool {
     }
 
     public String modifyAddress(String orderId, String newAddress) {
-        OrderInfo order = queryOrder(orderId);
-        if (order == null) {
-            return "订单不存在";
+        try {
+            McpSchema.CallToolResult result = orderMcpClient.callTool(
+                    "modify_order_address",
+                    Map.of("orderId", orderId, "newAddress", newAddress));
+            return extractText(result);
+        } catch (Exception e) {
+            log.error("MCP modify_order_address failed for {}: {}", orderId, e.getMessage());
+            return "修改地址失败：" + e.getMessage();
         }
-        if (!"PENDING".equals(order.getStatus()) && !"PAID".equals(order.getStatus())) {
-            return "订单已发货，无法修改地址，请转售后处理";
+    }
+
+    private static String extractText(McpSchema.CallToolResult result) {
+        List<McpSchema.Content> contents = result.content();
+        if (contents == null || contents.isEmpty()) {
+            return "";
         }
-        order.setAddress(newAddress);
-        log.info("Address modified: orderId={}, newAddress={}", orderId, newAddress);
-        return "地址修改成功，新地址：" + newAddress;
+        StringBuilder sb = new StringBuilder();
+        for (McpSchema.Content content : contents) {
+            if (content instanceof McpSchema.TextContent textContent) {
+                if (!sb.isEmpty()) {
+                    sb.append('\n');
+                }
+                sb.append(textContent.text());
+            }
+        }
+        return sb.toString();
     }
 }

@@ -11,7 +11,7 @@
 
     <artifactId>cs-order-service</artifactId>
     <name>CS Order Service</name>
-    <description>订单服务：内存订单库 + MCP Streamable HTTP 工具端点</description>
+    <description>订单服务：PostgreSQL 订单库 + MCP Streamable HTTP 工具端点</description>
 
     <dependencies>
         <dependency>
@@ -25,7 +25,15 @@
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
         </dependency>
 
         <!-- 与 AgentScope 2.0.2 对齐的 MCP Java SDK -->

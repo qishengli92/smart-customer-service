@@ -1,5 +1,7 @@
 package com.cs.infra.persistence;
 
+import com.cs.common.enums.MessageRole;
+import com.cs.common.enums.SessionStatus;
 import com.cs.common.model.ChatMessage;
 import com.cs.common.model.ChatSession;
 import com.cs.common.model.HandoffRecord;
@@ -9,17 +11,25 @@ import com.cs.infra.persistence.entity.CsHandoffEntity;
 import com.cs.infra.persistence.entity.CsMessageEntity;
 import com.cs.infra.persistence.entity.CsSessionEntity;
 import com.cs.infra.persistence.entity.CsToolCallLogEntity;
+import com.cs.infra.persistence.entity.CsUserEntity;
 import com.cs.infra.persistence.repo.CsHandoffRepository;
 import com.cs.infra.persistence.repo.CsMessageRepository;
 import com.cs.infra.persistence.repo.CsSessionRepository;
 import com.cs.infra.persistence.repo.CsToolCallLogRepository;
+import com.cs.infra.persistence.repo.CsUserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
  * 对话冷存储门面（PostgreSQL）：会话 / 消息 / 工具审计 / 交接单。
@@ -35,6 +45,7 @@ public class ConversationPersistenceService {
     private final CsMessageRepository messageRepository;
     private final CsToolCallLogRepository toolCallLogRepository;
     private final CsHandoffRepository handoffRepository;
+    private final CsUserRepository userRepository;
 
     @Transactional
     public void upsertSession(ChatSession session) {
@@ -134,5 +145,92 @@ public class ConversationPersistenceService {
         } catch (Exception e) {
             log.warn("Failed to persist handoff {}: {}", record.getId(), e.getMessage());
         }
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<ChatSession> loadSession(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            return Optional.empty();
+        }
+        try {
+            return sessionRepository.findById(sessionId).map(this::toChatSession);
+        } catch (Exception e) {
+            log.warn("Failed to load session {}: {}", sessionId, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public List<ChatSession> listSessionsByUser(String userId, int limit) {
+        if (userId == null || userId.isBlank()) {
+            return Collections.emptyList();
+        }
+        int pageSize = Math.min(Math.max(limit, 1), 100);
+        try {
+            return sessionRepository
+                    .findByUserIdOrderByLastActiveAtDesc(userId, PageRequest.of(0, pageSize))
+                    .stream()
+                    .map(this::toChatSession)
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            log.warn("Failed to list sessions for user {}: {}", userId, e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public List<ChatMessage> listMessages(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            return Collections.emptyList();
+        }
+        try {
+            return messageRepository.findBySessionIdOrderByCreatedAtAsc(sessionId).stream()
+                    .map(this::toChatMessage)
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            log.warn("Failed to list messages for session {}: {}", sessionId, e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public List<CsUserEntity> listActiveUsers() {
+        try {
+            return userRepository.findByStatusOrderByVipLevelDesc("active");
+        } catch (Exception e) {
+            log.warn("Failed to list users: {}", e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    private ChatSession toChatSession(CsSessionEntity entity) {
+        Map<String, Object> context = entity.getContext() != null
+                ? new ConcurrentHashMap<>(entity.getContext())
+                : new ConcurrentHashMap<>();
+        return ChatSession.builder()
+                .sessionId(entity.getSessionId())
+                .tenantId(entity.getTenantId() != null ? entity.getTenantId() : "default")
+                .userId(entity.getUserId())
+                .channel(entity.getChannel())
+                .activeAgent(entity.getActiveAgent())
+                .status(SessionStatus.fromNameOrCode(entity.getStatus()))
+                .context(context)
+                .createdAt(entity.getCreatedAt())
+                .lastActiveAt(entity.getLastActiveAt())
+                .build();
+    }
+
+    private ChatMessage toChatMessage(CsMessageEntity entity) {
+        return ChatMessage.builder()
+                .messageId(entity.getMessageId())
+                .sessionId(entity.getSessionId())
+                .role(MessageRole.fromCode(entity.getRole()))
+                .content(entity.getContent())
+                .agentName(entity.getAgentName())
+                .toolName(entity.getToolName())
+                .toolParams(entity.getToolParams())
+                .metadata(entity.getMetadata())
+                .timestamp(entity.getCreatedAt())
+                .build();
     }
 }

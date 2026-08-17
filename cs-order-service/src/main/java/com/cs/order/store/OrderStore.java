@@ -1,103 +1,142 @@
 package com.cs.order.store;
 
 import com.cs.common.model.OrderInfo;
+import com.cs.order.entity.CsOrderEntity;
+import com.cs.order.repo.CsOrderRepository;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Optional;
 
 /**
- * 进程内订单库（MVP Mock）。生产可替换为真实订单中心 / DB。
+ * 订单仓储：读写 PostgreSQL {@code cs_order}，对外仍暴露 {@link OrderInfo}。
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class OrderStore {
 
-    private static final DateTimeFormatter FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter FMT = DateTimeFormatter
+            .ofPattern("yyyy-MM-dd HH:mm:ss")
+            .withZone(ZoneId.of("Asia/Shanghai"));
 
-    private final Map<String, OrderInfo> orders = new ConcurrentHashMap<>();
+    private final CsOrderRepository orderRepository;
 
-    public OrderStore() {
-        seed();
-    }
-
+    @Transactional(readOnly = true)
     public OrderInfo findById(String orderId) {
         if (orderId == null || orderId.isBlank()) {
             return null;
         }
-        OrderInfo order = orders.get(orderId.trim().toUpperCase());
-        if (order != null) {
-            log.info("Order found: {}", orderId);
-        } else {
+        String key = orderId.trim();
+        Optional<CsOrderEntity> entity = orderRepository.findByOrderIdOrOrderNo(key);
+        if (entity.isEmpty()) {
             log.warn("Order not found: {}", orderId);
+            return null;
         }
-        return order;
+        log.info("Order found: {}", orderId);
+        return toOrderInfo(entity.get());
     }
 
+    @Transactional
     public String modifyAddress(String orderId, String newAddress) {
-        OrderInfo order = findById(orderId);
-        if (order == null) {
+        if (orderId == null || orderId.isBlank()) {
             return "订单不存在";
         }
-        if (!"PENDING".equals(order.getStatus()) && !"PAID".equals(order.getStatus())) {
+        Optional<CsOrderEntity> opt = orderRepository.findByOrderIdOrOrderNo(orderId.trim());
+        if (opt.isEmpty()) {
+            return "订单不存在";
+        }
+        CsOrderEntity entity = opt.get();
+        String status = normalizeStatus(entity.getStatus());
+        if (!"PENDING".equals(status) && !"PAID".equals(status)) {
             return "订单已发货，无法修改地址，请转售后处理";
         }
-        order.setAddress(newAddress);
-        order.setUpdatedAt(LocalDateTime.now().format(FMT));
+        Map<String, Object> addr = entity.getShippingAddr() != null
+                ? new LinkedHashMap<>(entity.getShippingAddr())
+                : new LinkedHashMap<>();
+        addr.put("detail", newAddress);
+        // 兼容扁平地址展示：同时写入完整地址字段
+        addr.put("full", newAddress);
+        entity.setShippingAddr(addr);
+        entity.setUpdatedAt(Instant.now());
+        orderRepository.save(entity);
         log.info("Address modified: orderId={}, newAddress={}", orderId, newAddress);
         return "地址修改成功，新地址：" + newAddress;
     }
 
-    private void seed() {
-        put(OrderInfo.builder()
-                .orderId("ORD20260609001").userId("U001")
-                .productName("智能手表 Pro").amount(1299.00)
-                .status("DELIVERED").address("北京市海淀区中关村大街1号")
-                .logisticsInfo("已签收，签收人：本人")
-                .createdAt("2026-06-05 14:30:00").updatedAt("2026-06-09 10:15:00")
-                .build());
-        put(OrderInfo.builder()
-                .orderId("ORD20260608002").userId("U001")
-                .productName("无线降噪耳机").amount(899.00)
-                .status("SHIPPED").address("北京市海淀区中关村大街1号")
-                .logisticsInfo("运输中，已到达北京转运中心")
-                .createdAt("2026-06-08 09:20:00").updatedAt("2026-06-09 08:00:00")
-                .build());
-        put(OrderInfo.builder()
-                .orderId("ORD20260607003").userId("U002")
-                .productName("便携充电宝 20000mAh").amount(299.00)
-                .status("PENDING").address("上海市浦东新区陆家嘴环路1000号")
-                .logisticsInfo("待发货")
-                .createdAt("2026-06-07 16:45:00").updatedAt("2026-06-07 16:45:00")
-                .build());
-        put(OrderInfo.builder()
-                .orderId("ORD20260601001").userId("U100001")
-                .productName("智能蓝牙耳机 Pro").amount(299.00)
-                .status("DELIVERED").address("上海市浦东新区张江高科技园区")
-                .logisticsInfo("已签收")
-                .createdAt("2026-06-01 10:00:00").updatedAt("2026-06-03 18:00:00")
-                .build());
-        put(OrderInfo.builder()
-                .orderId("ORD20260602001").userId("U100001")
-                .productName("轻薄笔记本电脑 AirBook 14").amount(4599.00)
-                .status("SHIPPED").address("上海市浦东新区张江高科技园区")
-                .logisticsInfo("运输中")
-                .createdAt("2026-06-02 11:00:00").updatedAt("2026-06-04 09:00:00")
-                .build());
-        put(OrderInfo.builder()
-                .orderId("ORD20260603001").userId("U100002")
-                .productName("智能手表 Watch S8").amount(3198.00)
-                .status("PAID").address("北京市海淀区中关村")
-                .logisticsInfo("待发货")
-                .createdAt("2026-06-03 12:00:00").updatedAt("2026-06-03 12:30:00")
-                .build());
-        log.info("OrderStore seeded with {} orders", orders.size());
+    private OrderInfo toOrderInfo(CsOrderEntity entity) {
+        String displayId = entity.getOrderNo() != null ? entity.getOrderNo() : entity.getOrderId();
+        BigDecimal amount = entity.getTotalAmount() != null
+                ? entity.getTotalAmount()
+                : entity.getUnitPrice();
+        return OrderInfo.builder()
+                .orderId(displayId)
+                .userId(entity.getUserId())
+                .productName(entity.getProductName())
+                .amount(amount != null ? amount.doubleValue() : 0.0)
+                .status(normalizeStatus(entity.getStatus()))
+                .address(formatAddress(entity.getShippingAddr()))
+                .logisticsInfo(resolveLogistics(entity))
+                .createdAt(formatInstant(entity.getCreatedAt()))
+                .updatedAt(formatInstant(entity.getUpdatedAt()))
+                .build();
     }
 
-    private void put(OrderInfo order) {
-        orders.put(order.getOrderId(), order);
+    private static String normalizeStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return "PENDING";
+        }
+        return status.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private static String formatAddress(Map<String, Object> addr) {
+        if (addr == null || addr.isEmpty()) {
+            return "";
+        }
+        if (addr.get("full") != null) {
+            return String.valueOf(addr.get("full"));
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String key : new String[]{"province", "city", "district", "detail"}) {
+            Object v = addr.get(key);
+            if (v != null && !String.valueOf(v).isBlank()) {
+                sb.append(v);
+            }
+        }
+        if (sb.length() == 0 && addr.get("detail") != null) {
+            return String.valueOf(addr.get("detail"));
+        }
+        return sb.toString();
+    }
+
+    private static String resolveLogistics(CsOrderEntity entity) {
+        String status = normalizeStatus(entity.getStatus());
+        if (entity.getTrackingNo() != null && !entity.getTrackingNo().isBlank()) {
+            return "运单号：" + entity.getTrackingNo();
+        }
+        return switch (status) {
+            case "DELIVERED" -> "已签收";
+            case "SHIPPED" -> "运输中";
+            case "PAID" -> "已付款，待发货";
+            case "PENDING" -> "待发货";
+            case "CANCELLED" -> "已取消";
+            default -> "暂无物流信息";
+        };
+    }
+
+    private static String formatInstant(Instant instant) {
+        if (instant == null) {
+            return "";
+        }
+        return FMT.format(instant);
     }
 }

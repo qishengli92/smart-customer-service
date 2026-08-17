@@ -20,4 +20,16 @@ public enum MessageRole {
 
     public String getCode() { return code; }
     public String getLabel() { return label; }
+
+    public static MessageRole fromCode(String code) {
+        if (code == null || code.isBlank()) {
+            return USER;
+        }
+        for (MessageRole role : values()) {
+            if (role.code.equalsIgnoreCase(code) || role.name().equalsIgnoreCase(code)) {
+                return role;
+            }
+        }
+        return USER;
+    }
 }

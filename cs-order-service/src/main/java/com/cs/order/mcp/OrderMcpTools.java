@@ -36,7 +36,7 @@ public class OrderMcpTools {
         Map<String, Object> properties = new LinkedHashMap<>();
         properties.put("orderId", Map.of(
                 "type", "string",
-                "description", "订单号，例如 ORD20260609001"));
+                "description", "订单号，例如 ORD20260601001（支持 order_no / order_id）"));
 
         Tool tool = Tool.builder()
                 .name("query_order")

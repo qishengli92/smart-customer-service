@@ -24,4 +24,16 @@ public enum SessionStatus {
 
     public String getCode() { return code; }
     public String getLabel() { return label; }
+
+    public static SessionStatus fromNameOrCode(String value) {
+        if (value == null || value.isBlank()) {
+            return ACTIVE;
+        }
+        for (SessionStatus status : values()) {
+            if (status.name().equalsIgnoreCase(value) || status.code.equalsIgnoreCase(value)) {
+                return status;
+            }
+        }
+        return ACTIVE;
+    }
 }

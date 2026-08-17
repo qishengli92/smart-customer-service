@@ -1,6 +1,7 @@
 package com.cs.gateway.session;
 
 import com.cs.common.enums.SessionStatus;
+import com.cs.common.model.ChatMessage;
 import com.cs.common.model.ChatSession;
 import com.cs.common.util.IdGenerator;
 import com.cs.infra.persistence.ConversationPersistenceService;
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -63,11 +65,44 @@ public class SessionManager {
                 sessions.put(sessionId, session);
             }
         }
+        if (session == null) {
+            session = persistence.loadSession(sessionId).orElse(null);
+            if (session != null) {
+                sessions.put(sessionId, session);
+                redisJsonStore.set(KEY_PREFIX + sessionId, session, TTL);
+                log.info("Session hydrated from PostgreSQL: sessionId={}, userId={}",
+                        sessionId, session.getUserId());
+            }
+        }
         if (session != null) {
             session.touch();
             persist(session);
         }
         return session;
+    }
+
+    /**
+     * 仅读取会话（不 touch / 不写回），用于历史列表与消息查询。
+     */
+    public ChatSession peekSession(String sessionId) {
+        ChatSession session = sessions.get(sessionId);
+        if (session != null) {
+            return session;
+        }
+        session = redisJsonStore.get(KEY_PREFIX + sessionId, ChatSession.class).orElse(null);
+        if (session != null) {
+            sessions.put(sessionId, session);
+            return session;
+        }
+        return persistence.loadSession(sessionId).orElse(null);
+    }
+
+    public List<ChatSession> listSessionsByUser(String userId, int limit) {
+        return persistence.listSessionsByUser(userId, limit);
+    }
+
+    public List<ChatMessage> listMessages(String sessionId) {
+        return persistence.listMessages(sessionId);
     }
 
     public ChatSession getOrCreateSession(String sessionId, String userId, String channel) {

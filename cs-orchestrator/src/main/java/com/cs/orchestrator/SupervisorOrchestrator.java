@@ -22,6 +22,7 @@ import com.cs.infra.observability.LangFuseTracer;
 import com.cs.infra.observability.TraceContext;
 import com.cs.infra.persistence.ConversationPersistenceService;
 import com.cs.knowledge.hook.KnowledgeRAGHook;
+import com.cs.knowledge.retrieval.RagResult;
 import com.cs.memory.shortterm.ShortTermMemoryManager;
 import com.cs.tools.handoff.HumanHandoffTool;
 import com.cs.tools.permission.ConfirmedToolExecutor;
@@ -183,8 +184,11 @@ public class SupervisorOrchestrator {
             persistence.upsertSession(session);
 
             // RAG 仅知识意图；长期记忆由 AgentScope LongTermMemory 在 Agent 内自动注入
-            String ragContext = intent == IntentType.KNOWLEDGE
-                    ? knowledgeRAGHook.beforeReasoning(userMessage, 5) : "";
+            RagResult rag = RagResult.empty();
+            if (intent == IntentType.KNOWLEDGE || intent == IntentType.PRE_SALES) {
+                rag = knowledgeRAGHook.retrieve(userMessage, 5);
+            }
+            String ragContext = rag.isEmpty() ? "" : rag.getContext();
 
             AgentHandleResult result = dispatchToAgent(intent, userMessage, ragContext, session);
 
@@ -219,6 +223,7 @@ public class SupervisorOrchestrator {
             persistence.saveMessage(assistant);
             // 长期记忆由 Agent 内 LongTermMemory.record 异步写入，无需编排器再调
             sink.tryEmitNext(StreamEvent.agentStart(intent.getCode()));
+            emitCitations(sink, rag, intent.getCode());
             streamResponse(sink, agentResponse, intent.getCode(), sessionId);
             tracer.endTrace(sessionId, Map.of("response", agentResponse, "intent", intent.getCode()));
         } catch (Exception e) {
@@ -286,8 +291,11 @@ public class SupervisorOrchestrator {
         session.touch();
         persistence.upsertSession(session);
         // 取消确认后续跑：RAG（如需）后派发；记忆由 AgentScope 组件负责
-        String ragContext = intent == IntentType.KNOWLEDGE
-                ? knowledgeRAGHook.beforeReasoning(userMessage, 5) : "";
+        RagResult rag = RagResult.empty();
+        if (intent == IntentType.KNOWLEDGE || intent == IntentType.PRE_SALES) {
+            rag = knowledgeRAGHook.retrieve(userMessage, 5);
+        }
+        String ragContext = rag.isEmpty() ? "" : rag.getContext();
         AgentHandleResult result = dispatchToAgent(intent, userMessage, ragContext, session);
         if (result.hasPending()) {
             session.setStatus(SessionStatus.WAITING_CONFIRM);
@@ -311,6 +319,7 @@ public class SupervisorOrchestrator {
         ChatMessage assistant = ChatMessage.assistantMsg(session.getSessionId(), agentResponse, intent.getCode());
         shortTermMemory.addMessage(session.getSessionId(), assistant);
         persistence.saveMessage(assistant);
+        emitCitations(sink, rag, intent.getCode());
         streamResponse(sink, agentResponse, intent.getCode(), session.getSessionId());
     }
 
@@ -463,6 +472,13 @@ public class SupervisorOrchestrator {
         }
         sink.tryEmitNext(StreamEvent.agentEnd(agentName));
         sink.tryEmitNext(StreamEvent.done(sessionId));
+    }
+
+    private void emitCitations(Sinks.Many<StreamEvent> sink, RagResult rag, String agentName) {
+        if (rag == null || rag.isEmpty() || rag.getCitations() == null || rag.getCitations().isEmpty()) {
+            return;
+        }
+        sink.tryEmitNext(StreamEvent.citations(JsonUtils.toJson(rag.getCitations()), agentName));
     }
 
     private boolean isApproveText(String msg) {

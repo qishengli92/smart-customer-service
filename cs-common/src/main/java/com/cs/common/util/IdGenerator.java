@@ -65,6 +65,13 @@ public final class IdGenerator {
         return "ho_" + shortId();
     }
 
+    /**
+     * 生成知识库文档 ID
+     */
+    public static String knowledgeDocId() {
+        return "KD" + shortId();
+    }
+
     private static String shortId() {
         return UUID.randomUUID().toString().replace("-", "").substring(0, 16);
     }

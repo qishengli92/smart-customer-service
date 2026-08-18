@@ -429,6 +429,31 @@
             height: 20px;
         }
 
+        .cite-list {
+            margin-top: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .cite-card {
+            background: #f8fafc;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px 10px;
+            font-size: 12px;
+            color: var(--text-light);
+        }
+        .cite-card strong { color: var(--text); font-weight: 600; }
+        .cite-ref {
+            display: inline-block;
+            background: #e0e7ff;
+            color: #3730a3;
+            border-radius: 4px;
+            padding: 0 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
         /* Welcome */
         .welcome {
             flex: 1;
@@ -527,6 +552,7 @@
             </div>
         </div>
         <div class="header-right">
+            <a class="btn-new-session" href="/admin/knowledge.html" style="text-decoration:none">知识库</a>
             <select class="user-select" id="userSelect" title="切换用户" onchange="onUserChange()"></select>
             <div class="status-badge">
                 <div class="status-dot" id="statusDot"></div>
@@ -845,6 +871,9 @@
                         updateAssistantText(currentText);
                     }
                     break;
+                case 'citations':
+                    renderCitations(event.data);
+                    break;
                 case 'tool_call':
                     appendEventIndicator(`🔧 调用工具: ${event.data}`);
                     break;
@@ -936,6 +965,39 @@
             scrollToBottom();
         }
 
+        function renderCitations(raw) {
+            if (!currentAssistantEl || !raw) return;
+            let items = [];
+            try {
+                items = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            } catch (e) {
+                return;
+            }
+            if (!Array.isArray(items) || !items.length) return;
+            let list = currentAssistantEl.querySelector('[data-cites]');
+            if (!list) {
+                list = document.createElement('div');
+                list.className = 'cite-list';
+                list.setAttribute('data-cites', '1');
+                const bubble = currentAssistantEl.querySelector('.message-bubble');
+                if (bubble && bubble.parentElement) {
+                    bubble.parentElement.appendChild(list);
+                } else {
+                    currentAssistantEl.appendChild(list);
+                }
+            }
+            list.innerHTML = items.map(c => `
+                <div class="cite-card">
+                    <span class="cite-ref">[${c.index ?? ''}]</span>
+                    <strong>${escapeHtml(c.title || c.heading || '知识条目')}</strong>
+                    ${c.category ? ' · ' + escapeHtml(c.category) : ''}
+                    ${c.score != null ? ' · ' + Number(c.score).toFixed(2) : ''}
+                    ${c.heading && c.heading !== c.title ? '<div>' + escapeHtml(c.heading) + '</div>' : ''}
+                </div>
+            `).join('');
+            scrollToBottom();
+        }
+
         function appendEventIndicator(text) {
             if (!currentAssistantEl) return;
             const label = currentAssistantEl.querySelector('.agent-label');
@@ -983,6 +1045,7 @@
                 .replace(/>/g, '&gt;')
                 .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
                 .replace(/`(.*?)`/g, '<code style="background:#f1f5f9;padding:1px 4px;border-radius:3px;font-size:13px">$1</code>')
+                .replace(/\[(\d+)\]/g, '<span class="cite-ref">[$1]</span>')
                 .replace(/\n/g, '<br>');
         }
 

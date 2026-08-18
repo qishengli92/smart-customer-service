@@ -16,8 +16,14 @@ import org.springframework.scheduling.annotation.EnableAsync;
  * 基础设施在 {@code cs-infra}（DashScope / LangFuse / Redis / PG / Milvus）。
  */
 @SpringBootApplication(scanBasePackages = "com.cs")
-@EntityScan(basePackages = "com.cs.infra.persistence.entity")
-@EnableJpaRepositories(basePackages = "com.cs.infra.persistence.repo")
+@EntityScan(basePackages = {
+        "com.cs.infra.persistence.entity",
+        "com.cs.knowledge.persistence.entity"
+})
+@EnableJpaRepositories(basePackages = {
+        "com.cs.infra.persistence.repo",
+        "com.cs.knowledge.persistence.repo"
+})
 @EnableConfigurationProperties
 @EnableAsync
 public class CustomerServiceApplication {
@@ -29,6 +35,7 @@ public class CustomerServiceApplication {
                 ============================================
                   智能客服 Agent 系统 MVP-1.0 已启动
                   Web Chat: http://localhost:8080
+                  知识库后台: http://localhost:8080/admin/knowledge.html
                   SSE API:  http://localhost:8080/api/v1/chat/stream
                   Confirm:  POST /api/v1/chat/confirmations/{id}
                   Handoff:  /api/v1/handoff/**

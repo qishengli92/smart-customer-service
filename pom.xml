@@ -59,6 +59,9 @@
         <opentelemetry.version>1.61.0</opentelemetry.version>
         <opentelemetry.reactor.version>2.27.0-alpha</opentelemetry.reactor.version>
 
+        <!-- Apache Tika（知识库文档解析） -->
+        <tika.version>2.9.2</tika.version>
+
         <!-- Utils -->
         <lombok.version>1.18.36</lombok.version>
         <mapstruct.version>1.6.3</mapstruct.version>
@@ -180,6 +183,16 @@
                 <groupId>org.mapstruct</groupId>
                 <artifactId>mapstruct</artifactId>
                 <version>${mapstruct.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.tika</groupId>
+                <artifactId>tika-core</artifactId>
+                <version>${tika.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.tika</groupId>
+                <artifactId>tika-parsers-standard-package</artifactId>
+                <version>${tika.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

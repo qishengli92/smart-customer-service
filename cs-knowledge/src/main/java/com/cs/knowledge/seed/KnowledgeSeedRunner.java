@@ -28,10 +28,9 @@ public class KnowledgeSeedRunner implements ApplicationRunner {
         }
         try {
             int n = ingestService.seedFaqToMilvus();
-            log.info("Startup FAQ Milvus seed finished, upserted={}", n);
+            log.info("Startup knowledge seed finished, indexed={}", n);
         } catch (Exception e) {
-            log.warn("Startup FAQ Milvus seed skipped/failed (seed keyword search still available): {}",
-                    e.getMessage());
+            log.warn("Startup knowledge seed skipped/failed: {}", e.getMessage());
             log.debug("Milvus seed failure detail", e);
         }
     }

@@ -76,6 +76,14 @@ public final class FaqSeedKnowledge {
 
     private FaqSeedKnowledge() {}
 
+    public record SeedFaq(String id, String title, String category, String content, List<String> keywords) {}
+
+    public static List<SeedFaq> allFaqs() {
+        return DOCS.stream()
+                .map(d -> new SeedFaq(d.id, d.title, d.category, d.content.trim(), List.of(d.keywords)))
+                .toList();
+    }
+
     /**
      * 全部种子 FAQ（用于写入 Milvus）
      */

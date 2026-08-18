@@ -31,3 +31,6 @@ docker-compose.override.yml
 # Build
 build/
 out/
+
+# 知识库上传原文
+data/knowledge/

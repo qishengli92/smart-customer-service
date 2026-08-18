@@ -142,4 +142,15 @@ public class StreamEvent {
                 .agentName(agentId)
                 .build();
     }
+
+    /**
+     * 知识库引用（JSON 数组：index/title/heading/category/score）。
+     */
+    public static StreamEvent citations(String jsonPayload, String agentName) {
+        return StreamEvent.builder()
+                .type("citations")
+                .data(jsonPayload)
+                .agentName(agentName)
+                .build();
+    }
 }

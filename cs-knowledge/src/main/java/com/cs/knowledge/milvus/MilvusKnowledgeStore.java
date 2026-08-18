@@ -16,6 +16,7 @@ import io.milvus.param.collection.FieldType;
 import io.milvus.param.collection.FlushParam;
 import io.milvus.param.collection.HasCollectionParam;
 import io.milvus.param.collection.LoadCollectionParam;
+import io.milvus.param.dml.DeleteParam;
 import io.milvus.param.dml.InsertParam;
 import io.milvus.param.dml.SearchParam;
 import io.milvus.param.dml.UpsertParam;
@@ -32,7 +33,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * FAQ 知识库 Milvus 读写：建表、upsert、向量检索（collection 如 {@code cs_faq}）。
+ * 知识库 Milvus 读写：collection {@code cs_knowledge}，按 chunk 存储、按 doc_id 删除。
  */
 @Slf4j
 @Service
@@ -40,8 +41,10 @@ import java.util.Map;
 public class MilvusKnowledgeStore {
 
     public static final String FIELD_CHUNK_ID = "chunk_id";
+    public static final String FIELD_DOC_ID = "doc_id";
     public static final String FIELD_TITLE = "title";
     public static final String FIELD_CATEGORY = "category";
+    public static final String FIELD_HEADING = "heading";
     public static final String FIELD_CONTENT = "content";
     public static final String FIELD_EMBEDDING = "embedding";
 
@@ -50,7 +53,7 @@ public class MilvusKnowledgeStore {
 
     public boolean isAvailable() {
         try {
-            String collection = milvusProperties.faqCollectionName();
+            String collection = collectionName();
             R<Boolean> resp = milvusClient.hasCollection(
                     HasCollectionParam.newBuilder().withCollectionName(collection).build());
             return resp.getStatus() == R.Status.Success.getCode();
@@ -61,7 +64,7 @@ public class MilvusKnowledgeStore {
     }
 
     public synchronized void ensureCollection() {
-        String collection = milvusProperties.faqCollectionName();
+        String collection = collectionName();
         int dim = milvusProperties.getEmbeddingDimension();
 
         R<Boolean> has = milvusClient.hasCollection(
@@ -74,23 +77,11 @@ public class MilvusKnowledgeStore {
 
         log.info("Creating Milvus collection: {}, dim={}", collection, dim);
         List<FieldType> fields = List.of(
-                FieldType.newBuilder()
-                        .withName(FIELD_CHUNK_ID)
-                        .withDataType(DataType.VarChar)
-                        .withMaxLength(64)
-                        .withPrimaryKey(true)
-                        .withAutoID(false)
-                        .build(),
-                FieldType.newBuilder()
-                        .withName(FIELD_TITLE)
-                        .withDataType(DataType.VarChar)
-                        .withMaxLength(256)
-                        .build(),
-                FieldType.newBuilder()
-                        .withName(FIELD_CATEGORY)
-                        .withDataType(DataType.VarChar)
-                        .withMaxLength(128)
-                        .build(),
+                varcharPk(FIELD_CHUNK_ID, 64),
+                varchar(FIELD_DOC_ID, 64),
+                varchar(FIELD_TITLE, 512),
+                varchar(FIELD_CATEGORY, 128),
+                varchar(FIELD_HEADING, 512),
                 FieldType.newBuilder()
                         .withName(FIELD_CONTENT)
                         .withDataType(DataType.VarChar)
@@ -106,7 +97,7 @@ public class MilvusKnowledgeStore {
         R<RpcStatus> create = milvusClient.createCollection(
                 CreateCollectionParam.newBuilder()
                         .withCollectionName(collection)
-                        .withDescription("Smart CS FAQ knowledge chunks")
+                        .withDescription("Smart CS knowledge chunks")
                         .withFieldTypes(fields)
                         .build());
         handle(create, "createCollection");
@@ -124,9 +115,6 @@ public class MilvusKnowledgeStore {
         log.info("Milvus collection ready: {}", collection);
     }
 
-    /**
-     * Upsert FAQ chunks（按 chunk_id 幂等）。
-     */
     public int upsertChunks(List<KnowledgeChunk> chunks, List<float[]> embeddings) {
         if (chunks == null || chunks.isEmpty()) {
             return 0;
@@ -135,97 +123,96 @@ public class MilvusKnowledgeStore {
             throw new IllegalArgumentException("embeddings size must match chunks");
         }
         ensureCollection();
-        String collection = milvusProperties.faqCollectionName();
+        String collection = collectionName();
 
         List<String> ids = new ArrayList<>(chunks.size());
+        List<String> docIds = new ArrayList<>(chunks.size());
         List<String> titles = new ArrayList<>(chunks.size());
         List<String> categories = new ArrayList<>(chunks.size());
+        List<String> headings = new ArrayList<>(chunks.size());
         List<String> contents = new ArrayList<>(chunks.size());
         List<List<Float>> vectors = new ArrayList<>(chunks.size());
 
         for (int i = 0; i < chunks.size(); i++) {
             KnowledgeChunk chunk = chunks.get(i);
             ids.add(chunk.getChunkId());
-            titles.add(nullToEmpty(chunk.getSourceDoc()));
+            docIds.add(nullToEmpty(chunk.getDocId()));
+            titles.add(truncate(nullToEmpty(chunk.getSourceDoc()), 512));
             String category = chunk.getMetadata() != null
                     ? chunk.getMetadata().getOrDefault("category", "") : "";
-            categories.add(category);
-            contents.add(nullToEmpty(chunk.getContent()));
+            categories.add(truncate(category, 128));
+            headings.add(truncate(nullToEmpty(chunk.getHeading()), 512));
+            contents.add(truncate(nullToEmpty(chunk.getContent()), 8192));
             vectors.add(toFloatList(embeddings.get(i)));
         }
 
         List<InsertParam.Field> fields = Arrays.asList(
                 new InsertParam.Field(FIELD_CHUNK_ID, ids),
+                new InsertParam.Field(FIELD_DOC_ID, docIds),
                 new InsertParam.Field(FIELD_TITLE, titles),
                 new InsertParam.Field(FIELD_CATEGORY, categories),
+                new InsertParam.Field(FIELD_HEADING, headings),
                 new InsertParam.Field(FIELD_CONTENT, contents),
                 new InsertParam.Field(FIELD_EMBEDDING, vectors)
         );
 
-        R<MutationResult> upsert = milvusClient.upsert(
-                UpsertParam.newBuilder()
-                        .withCollectionName(collection)
-                        .withFields(fields)
-                        .build());
-        handle(upsert, "upsert");
-
-        milvusClient.flush(FlushParam.newBuilder()
-                .withCollectionNames(List.of(collection))
-                .build());
-        loadCollection(collection);
+        R<MutationResult> upsert = retryOnRateLimit("upsert", () -> {
+            R<MutationResult> resp = milvusClient.upsert(
+                    UpsertParam.newBuilder()
+                            .withCollectionName(collection)
+                            .withFields(fields)
+                            .build());
+            handle(resp, "upsert");
+            return resp;
+        });
 
         long n = upsert.getData() != null ? upsert.getData().getUpsertCnt() : chunks.size();
-        log.info("Upserted {} FAQ chunks into Milvus collection {}", n, collection);
+        log.info("Upserted {} knowledge chunks into {}", n, collection);
         return (int) n;
     }
 
-    /**
-     * 兼容无 upsert 的环境：退化为 insert（调用方需保证不重复）。
-     */
-    public int insertChunks(List<KnowledgeChunk> chunks, List<float[]> embeddings) {
-        if (chunks == null || chunks.isEmpty()) {
-            return 0;
+    public void deleteByDocId(String docId) {
+        if (docId == null || docId.isBlank()) {
+            return;
         }
         ensureCollection();
-        String collection = milvusProperties.faqCollectionName();
+        String collection = collectionName();
+        String expr = FIELD_DOC_ID + " == \"" + escapeExpr(docId) + "\"";
+        retryOnRateLimit("delete", () -> {
+            R<MutationResult> resp = milvusClient.delete(
+                    DeleteParam.newBuilder()
+                            .withCollectionName(collection)
+                            .withExpr(expr)
+                            .build());
+            handle(resp, "delete");
+            return resp;
+        });
+        log.info("Deleted Milvus chunks for doc_id={}", docId);
+    }
 
-        List<String> ids = new ArrayList<>();
-        List<String> titles = new ArrayList<>();
-        List<String> categories = new ArrayList<>();
-        List<String> contents = new ArrayList<>();
-        List<List<Float>> vectors = new ArrayList<>();
-        for (int i = 0; i < chunks.size(); i++) {
-            KnowledgeChunk chunk = chunks.get(i);
-            ids.add(chunk.getChunkId());
-            titles.add(nullToEmpty(chunk.getSourceDoc()));
-            String category = chunk.getMetadata() != null
-                    ? chunk.getMetadata().getOrDefault("category", "") : "";
-            categories.add(category);
-            contents.add(nullToEmpty(chunk.getContent()));
-            vectors.add(toFloatList(embeddings.get(i)));
-        }
-
-        R<MutationResult> insert = milvusClient.insert(
-                InsertParam.newBuilder()
-                        .withCollectionName(collection)
-                        .withFields(Arrays.asList(
-                                new InsertParam.Field(FIELD_CHUNK_ID, ids),
-                                new InsertParam.Field(FIELD_TITLE, titles),
-                                new InsertParam.Field(FIELD_CATEGORY, categories),
-                                new InsertParam.Field(FIELD_CONTENT, contents),
-                                new InsertParam.Field(FIELD_EMBEDDING, vectors)
-                        ))
+    /**
+     * 批量入库结束后再 flush。单次 upsert/delete 不 flush：Milvus 默认 flush 限流约 0.1/s，
+     * 启动种子连刷会直接被 RateLimiter 拒绝。WAL 已可被 BOUNDED 检索看到。
+     */
+    public void flushQuietly() {
+        try {
+            ensureCollection();
+            String collection = collectionName();
+            retryOnRateLimit("flush", () -> {
+                R<?> resp = milvusClient.flush(FlushParam.newBuilder()
+                        .withCollectionNames(List.of(collection))
                         .build());
-        handle(insert, "insert");
-        milvusClient.flush(FlushParam.newBuilder()
-                .withCollectionNames(List.of(collection))
-                .build());
-        return chunks.size();
+                handle(resp, "flush");
+                return resp;
+            });
+        } catch (Exception e) {
+            log.warn("Milvus flush skipped (search still works on growing segments): {}", e.getMessage());
+        }
     }
 
     public List<KnowledgeChunk> search(float[] queryVector, int topK, double threshold) {
         ensureCollection();
-        String collection = milvusProperties.faqCollectionName();
+        String collection = collectionName();
         loadCollection(collection);
 
         List<List<Float>> vectors = List.of(toFloatList(queryVector));
@@ -233,10 +220,11 @@ public class MilvusKnowledgeStore {
                 SearchParam.newBuilder()
                         .withCollectionName(collection)
                         .withMetricType(MetricType.COSINE)
-                        .withTopK(topK)
+                        .withTopK(Math.max(1, topK))
                         .withVectors(vectors)
                         .withVectorFieldName(FIELD_EMBEDDING)
-                        .withOutFields(List.of(FIELD_CHUNK_ID, FIELD_TITLE, FIELD_CATEGORY, FIELD_CONTENT))
+                        .withOutFields(List.of(FIELD_CHUNK_ID, FIELD_DOC_ID, FIELD_TITLE,
+                                FIELD_CATEGORY, FIELD_HEADING, FIELD_CONTENT))
                         .withConsistencyLevel(ConsistencyLevelEnum.BOUNDED)
                         .build());
         handle(resp, "search");
@@ -250,8 +238,10 @@ public class MilvusKnowledgeStore {
                 continue;
             }
             String chunkId = (String) wrapper.getFieldData(FIELD_CHUNK_ID, 0).get(i);
+            String docId = (String) wrapper.getFieldData(FIELD_DOC_ID, 0).get(i);
             String title = (String) wrapper.getFieldData(FIELD_TITLE, 0).get(i);
             String category = (String) wrapper.getFieldData(FIELD_CATEGORY, 0).get(i);
+            String heading = (String) wrapper.getFieldData(FIELD_HEADING, 0).get(i);
             String content = (String) wrapper.getFieldData(FIELD_CONTENT, 0).get(i);
             Map<String, String> meta = new HashMap<>();
             if (category != null && !category.isBlank()) {
@@ -259,13 +249,20 @@ public class MilvusKnowledgeStore {
             }
             hits.add(KnowledgeChunk.builder()
                     .chunkId(chunkId)
+                    .docId(docId)
                     .sourceDoc(title)
+                    .heading(heading)
                     .content(content)
                     .score(score)
+                    .vectorScore(score)
                     .metadata(meta)
                     .build());
         }
         return hits;
+    }
+
+    private String collectionName() {
+        return milvusProperties.knowledgeCollectionName();
     }
 
     private void loadCollection(String collection) {
@@ -278,9 +275,26 @@ public class MilvusKnowledgeStore {
                             .withSyncLoadWaitingInterval(500L)
                             .build());
         } catch (Exception e) {
-            // 已 load 时忽略
             log.debug("loadCollection {}: {}", collection, e.getMessage());
         }
+    }
+
+    private static FieldType varcharPk(String name, int max) {
+        return FieldType.newBuilder()
+                .withName(name)
+                .withDataType(DataType.VarChar)
+                .withMaxLength(max)
+                .withPrimaryKey(true)
+                .withAutoID(false)
+                .build();
+    }
+
+    private static FieldType varchar(String name, int max) {
+        return FieldType.newBuilder()
+                .withName(name)
+                .withDataType(DataType.VarChar)
+                .withMaxLength(max)
+                .build();
     }
 
     private static List<Float> toFloatList(float[] arr) {
@@ -293,6 +307,46 @@ public class MilvusKnowledgeStore {
 
     private static String nullToEmpty(String s) {
         return s == null ? "" : s;
+    }
+
+    private static String truncate(String s, int max) {
+        if (s == null) {
+            return "";
+        }
+        return s.length() <= max ? s : s.substring(0, max);
+    }
+
+    private static String escapeExpr(String value) {
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    private <T> T retryOnRateLimit(String op, java.util.function.Supplier<T> action) {
+        int attempts = 4;
+        long backoffMs = 2500L;
+        for (int i = 1; i <= attempts; i++) {
+            try {
+                return action.get();
+            } catch (RuntimeException e) {
+                if (!isRateLimited(e) || i == attempts) {
+                    throw e;
+                }
+                log.warn("Milvus {} rate-limited, retry {}/{} after {}ms: {}",
+                        op, i, attempts, backoffMs, e.getMessage());
+                try {
+                    Thread.sleep(backoffMs);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+                backoffMs = Math.min(backoffMs * 2, 12_000L);
+            }
+        }
+        throw new IllegalStateException("Milvus " + op + " failed after retries");
+    }
+
+    private static boolean isRateLimited(Throwable e) {
+        String msg = e.getMessage();
+        return msg != null && (msg.contains("RateLimiter") || msg.contains("rate limit"));
     }
 
     private static <T> void handle(R<T> response, String op) {

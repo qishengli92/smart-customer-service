@@ -25,6 +25,11 @@ public class DashScopeModelProperties {
 
     private String embeddingModel = "text-embedding-v3";
 
+    /**
+     * DashScope 原生 API 根路径（Embedding text_type / Rerank 不走 OpenAI 兼容口）。
+     */
+    private String nativeBaseUrl = "https://dashscope.aliyuncs.com/api/v1";
+
     @Data
     public static class ModelSlot {
         private String name;

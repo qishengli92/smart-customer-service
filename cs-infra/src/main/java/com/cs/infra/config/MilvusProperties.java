@@ -46,6 +46,11 @@ public class MilvusProperties {
         return collectionPrefix + "faq";
     }
 
+    /** 运营知识库向量 collection（解析分块后的文档） */
+    public String knowledgeCollectionName() {
+        return collectionPrefix + "knowledge";
+    }
+
     /** 长期记忆向量 collection */
     public String memoryCollectionName() {
         return collectionPrefix + "memory";

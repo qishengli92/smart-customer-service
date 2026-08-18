@@ -2,70 +2,258 @@ package com.cs.knowledge.retrieval;
 
 import com.cs.infra.config.MilvusProperties;
 import com.cs.infra.embedding.DashScopeEmbeddingService;
+import com.cs.knowledge.config.KnowledgeProperties;
 import com.cs.knowledge.milvus.MilvusKnowledgeStore;
+import com.cs.knowledge.persistence.entity.CsKnowledgeChunkEntity;
+import com.cs.knowledge.persistence.entity.CsKnowledgeDocEntity;
+import com.cs.knowledge.persistence.repo.CsKnowledgeChunkRepository;
+import com.cs.knowledge.persistence.repo.CsKnowledgeDocRepository;
+import com.cs.knowledge.rerank.DashScopeRerankService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 /**
- * RAG 检索门面：用户问句 → Embedding → Milvus 相似度检索 → 格式化上下文。
- * <p>
- * 供 {@link com.cs.knowledge.hook.KnowledgeRAGHook} 调用；不依赖 AgentScope 废弃 RAG 包。
+ * 混合检索：向量 TopK + PG 关键词，RRF 融合后再 Rerank。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class KnowledgeRetrievalService {
 
+    private static final int RRF_K = 60;
+
     private final MilvusProperties milvusProperties;
+    private final KnowledgeProperties knowledgeProperties;
     private final MilvusKnowledgeStore milvusKnowledgeStore;
     private final DashScopeEmbeddingService embeddingService;
+    private final DashScopeRerankService rerankService;
+    private final CsKnowledgeChunkRepository chunkRepository;
+    private final CsKnowledgeDocRepository docRepository;
 
-    public List<KnowledgeChunk> retrieve(String query, String collection,
-                                         int topK, double threshold) {
-        log.info("Knowledge retrieval: query={}, collection={}, topK={}, threshold={}",
-                query != null ? query.substring(0, Math.min(30, query.length())) : "",
-                collection, topK, threshold);
+    public List<KnowledgeChunk> retrieve(String query, String collection, int topK, double threshold) {
+        return retrieveHybrid(query, topK, threshold);
+    }
 
+    public List<KnowledgeChunk> retrieveFromAll(String query, int topK, double threshold) {
+        return retrieveHybrid(query, topK, threshold);
+    }
+
+    public List<KnowledgeChunk> retrieveHybrid(String query, int topK, double threshold) {
+        if (query == null || query.isBlank()) {
+            return List.of();
+        }
+        int recallK = knowledgeProperties.getRecallK() > 0 ? knowledgeProperties.getRecallK() : 20;
+        int finalK = topK > 0 ? topK : milvusProperties.getTopK();
+
+        List<KnowledgeChunk> vectorHits = retrieveFromMilvus(query, recallK, 0.0);
+        List<KnowledgeChunk> keywordHits = keywordSearch(query, recallK);
+        List<KnowledgeChunk> fused = rrfFuse(vectorHits, keywordHits, recallK);
+
+        log.info("Knowledge hybrid retrieve: query={}, vector={}, keyword={}, fused={}",
+                query.substring(0, Math.min(30, query.length())),
+                vectorHits.size(), keywordHits.size(), fused.size());
+
+        List<KnowledgeChunk> reranked = rerankService.rerank(query, fused);
+        if (reranked.size() > finalK) {
+            reranked = new ArrayList<>(reranked.subList(0, finalK));
+        }
+        if (threshold > 0 && !reranked.isEmpty() && reranked.get(0).getRerankScore() == null) {
+            reranked.removeIf(c -> c.getScore() != null && c.getScore() < threshold);
+        }
+        return reranked;
+    }
+
+    public RagResult toRagResult(List<KnowledgeChunk> chunks) {
+        if (chunks == null || chunks.isEmpty()) {
+            return RagResult.empty();
+        }
+        StringBuilder sb = new StringBuilder("以下是从知识库检索到的相关信息：\n\n");
+        List<KnowledgeCitation> citations = new ArrayList<>();
+        for (int i = 0; i < chunks.size(); i++) {
+            KnowledgeChunk c = chunks.get(i);
+            int n = i + 1;
+            String category = c.getMetadata() != null ? c.getMetadata().getOrDefault("category", "") : "";
+            String title = c.getSourceDoc() != null ? c.getSourceDoc() : "";
+            String heading = c.getHeading() != null && !c.getHeading().isBlank() ? c.getHeading() : title;
+            sb.append(String.format("[%d] %s%s\n%s\n\n",
+                    n,
+                    heading,
+                    category.isBlank() ? "" : " / " + category,
+                    c.getContent()));
+            citations.add(KnowledgeCitation.builder()
+                    .index(n)
+                    .chunkId(c.getChunkId())
+                    .docId(c.getDocId())
+                    .title(title)
+                    .heading(heading)
+                    .category(category)
+                    .score(c.getScore())
+                    .build());
+        }
+        sb.append("请基于以上编号参考回答。在相关句末用 [1][2] 标注来源；不得引用未出现的编号。");
+        return RagResult.builder()
+                .context(sb.toString())
+                .chunks(chunks)
+                .citations(citations)
+                .build();
+    }
+
+    public String formatAsContext(List<KnowledgeChunk> chunks) {
+        return toRagResult(chunks).getContext();
+    }
+
+    private List<KnowledgeChunk> retrieveFromMilvus(String query, int topK, double threshold) {
+        if (milvusProperties.getHost() == null || milvusProperties.getHost().isBlank()) {
+            return List.of();
+        }
         try {
-            List<KnowledgeChunk> hits = retrieveFromMilvus(query, topK, threshold);
-            log.info("Milvus hits: {}", hits.size());
-            return hits;
+            float[] vector = embeddingService.embed(query, milvusProperties.getEmbeddingDimension(), "query");
+            if (vector == null || vector.length == 0) {
+                return List.of();
+            }
+            return milvusKnowledgeStore.search(vector, topK, threshold);
         } catch (Exception e) {
             log.warn("Milvus retrieve failed: {}", e.getMessage());
             return List.of();
         }
     }
 
-    public List<KnowledgeChunk> retrieveFromAll(String query, int topK, double threshold) {
-        return retrieve(query, milvusProperties.faqCollectionName(), topK, threshold);
+    private List<KnowledgeChunk> keywordSearch(String query, int topK) {
+        try {
+            List<CsKnowledgeChunkEntity> rows = chunkRepository.findAllSearchable();
+            if (rows.isEmpty()) {
+                return List.of();
+            }
+            Map<String, CsKnowledgeDocEntity> docs = new HashMap<>();
+            for (CsKnowledgeDocEntity d : docRepository.findAll()) {
+                docs.put(d.getDocId(), d);
+            }
+            String q = query.toLowerCase(Locale.ROOT);
+            List<KnowledgeChunk> scored = new ArrayList<>();
+            for (CsKnowledgeChunkEntity row : rows) {
+                CsKnowledgeDocEntity doc = docs.get(row.getDocId());
+                float score = keywordScore(q, doc, row);
+                if (score <= 0) {
+                    continue;
+                }
+                Map<String, String> meta = new HashMap<>();
+                if (doc != null && doc.getCategory() != null) {
+                    meta.put("category", doc.getCategory());
+                }
+                scored.add(KnowledgeChunk.builder()
+                        .chunkId(row.getChunkId())
+                        .docId(row.getDocId())
+                        .sourceDoc(doc != null ? doc.getTitle() : "")
+                        .heading(row.getHeading())
+                        .content(row.getContent())
+                        .keywordScore(score)
+                        .score(score)
+                        .metadata(meta)
+                        .build());
+            }
+            scored.sort(Comparator.comparing(KnowledgeChunk::getKeywordScore,
+                    Comparator.nullsLast(Comparator.reverseOrder())));
+            return scored.size() > topK ? scored.subList(0, topK) : scored;
+        } catch (Exception e) {
+            log.warn("Keyword search failed: {}", e.getMessage());
+            return List.of();
+        }
     }
 
-    public String formatAsContext(List<KnowledgeChunk> chunks) {
-        if (chunks == null || chunks.isEmpty()) {
-            return "未检索到相关知识。";
+    static float keywordScore(String queryLower, CsKnowledgeDocEntity doc, CsKnowledgeChunkEntity chunk) {
+        float score = 0f;
+        String title = doc != null && doc.getTitle() != null ? doc.getTitle().toLowerCase(Locale.ROOT) : "";
+        String content = chunk.getContent() != null ? chunk.getContent().toLowerCase(Locale.ROOT) : "";
+        String heading = chunk.getHeading() != null ? chunk.getHeading().toLowerCase(Locale.ROOT) : "";
+        String tags = doc != null && doc.getTags() != null ? doc.getTags().toLowerCase(Locale.ROOT) : "";
+        if (!title.isEmpty() && (title.contains(queryLower) || queryLower.contains(title))) {
+            score += 0.5f;
         }
-        StringBuilder sb = new StringBuilder("以下是从知识库检索到的相关信息：\n\n");
-        for (int i = 0; i < chunks.size(); i++) {
-            sb.append(String.format("【参考%d】%s\n\n", i + 1, chunks.get(i).toContextText()));
+        if (!heading.isEmpty() && heading.contains(queryLower)) {
+            score += 0.25f;
         }
-        sb.append("请基于以上信息回答用户问题。如果检索结果不足以回答，请坦诚告知。");
-        return sb.toString();
+        for (String token : queryLower.split("[\\s，。？?！!、,\\.]+")) {
+            if (token.length() < 2) {
+                continue;
+            }
+            if (title.contains(token) || heading.contains(token)) {
+                score += 0.2f;
+            }
+            if (content.contains(token)) {
+                score += 0.08f;
+            }
+            if (tags.contains(token)) {
+                score += 0.15f;
+            }
+        }
+        return Math.min(score, 1.0f);
     }
 
-    private List<KnowledgeChunk> retrieveFromMilvus(String query, int topK, double threshold) {
-        if (query == null || query.isBlank()) {
-            return List.of();
+    private List<KnowledgeChunk> rrfFuse(List<KnowledgeChunk> vectorHits,
+                                         List<KnowledgeChunk> keywordHits,
+                                         int limit) {
+        Map<String, KnowledgeChunk> byId = new LinkedHashMap<>();
+        Map<String, Double> rrf = new HashMap<>();
+
+        addRank(vectorHits, byId, rrf, true);
+        addRank(keywordHits, byId, rrf, false);
+
+        List<Map.Entry<String, Double>> ranked = new ArrayList<>(rrf.entrySet());
+        ranked.sort((a, b) -> Double.compare(b.getValue(), a.getValue()));
+
+        List<KnowledgeChunk> out = new ArrayList<>();
+        for (Map.Entry<String, Double> e : ranked) {
+            KnowledgeChunk src = byId.get(e.getKey());
+            if (src == null) {
+                continue;
+            }
+            out.add(KnowledgeChunk.builder()
+                    .chunkId(src.getChunkId())
+                    .docId(src.getDocId())
+                    .sourceDoc(src.getSourceDoc())
+                    .heading(src.getHeading())
+                    .content(src.getContent())
+                    .metadata(src.getMetadata())
+                    .vectorScore(src.getVectorScore())
+                    .keywordScore(src.getKeywordScore())
+                    .score(e.getValue().floatValue())
+                    .build());
+            if (out.size() >= limit) {
+                break;
+            }
         }
-        if (milvusProperties.getHost() == null || milvusProperties.getHost().isBlank()) {
-            return List.of();
+        return out;
+    }
+
+    private void addRank(List<KnowledgeChunk> hits, Map<String, KnowledgeChunk> byId,
+                         Map<String, Double> rrf, boolean vectorLane) {
+        for (int i = 0; i < hits.size(); i++) {
+            KnowledgeChunk hit = hits.get(i);
+            if (hit.getChunkId() == null) {
+                continue;
+            }
+            KnowledgeChunk existing = byId.get(hit.getChunkId());
+            if (existing == null) {
+                byId.put(hit.getChunkId(), hit);
+            } else {
+                if (vectorLane && hit.getVectorScore() != null) {
+                    existing.setVectorScore(hit.getVectorScore());
+                }
+                if (!vectorLane && hit.getKeywordScore() != null) {
+                    existing.setKeywordScore(hit.getKeywordScore());
+                }
+            }
+            double add = 1.0 / (RRF_K + i + 1);
+            rrf.merge(hit.getChunkId(), add, Double::sum);
         }
-        float[] vector = embeddingService.embed(query, milvusProperties.getEmbeddingDimension());
-        if (vector == null || vector.length == 0) {
-            return List.of();
-        }
-        return milvusKnowledgeStore.search(vector, topK, threshold);
     }
 }

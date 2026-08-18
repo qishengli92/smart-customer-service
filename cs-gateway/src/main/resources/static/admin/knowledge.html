@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>知识库管理</title>
+    <style>
+        :root {
+            --primary: #6366f1;
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --text: #1e293b;
+            --muted: #64748b;
+            --border: #e2e8f0;
+            --shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg); color: var(--text); min-height: 100vh;
+        }
+        .header {
+            background: linear-gradient(135deg, var(--primary) 0%, #8b5cf6 100%);
+            color: white; padding: 16px 24px;
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .header a { color: white; text-decoration: none; font-size: 13px; opacity: 0.9; }
+        .header h1 { font-size: 18px; font-weight: 600; }
+        .wrap { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+        input, select, textarea, button {
+            font: inherit; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
+        }
+        input, select, textarea { background: white; color: var(--text); }
+        textarea { width: 100%; min-height: 180px; resize: vertical; }
+        button { cursor: pointer; background: white; }
+        .btn-primary { background: var(--primary); color: white; border-color: var(--primary); }
+        .btn-danger { color: #b91c1c; border-color: #fecaca; }
+        .grid { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 16px; }
+        @media (max-width: 960px) { .grid { grid-template-columns: 1fr; } }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); }
+        .card h2 { font-size: 14px; padding: 12px 16px; border-bottom: 1px solid var(--border); color: var(--muted); }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+        th { color: var(--muted); font-weight: 600; background: #f8fafc; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; }
+        .READY { background: #dcfce7; color: #166534; }
+        .INDEXING { background: #e0e7ff; color: #3730a3; }
+        .FAILED { background: #fee2e2; color: #991b1b; }
+        .DRAFT { background: #f1f5f9; color: #475569; }
+        .form { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+        .row { display: flex; gap: 8px; }
+        .row > * { flex: 1; }
+        .muted { color: var(--muted); font-size: 12px; }
+        .chunk { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+        .hit { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+        .err { color: #b91c1c; font-size: 12px; }
+        .actions button { padding: 4px 8px; font-size: 12px; margin: 0 2px 4px 0; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h1>知识库管理</h1>
+            <div class="muted" style="color:rgba(255,255,255,.8)">文档入库 · 切片预览 · 检索试跑</div>
+        </div>
+        <a href="/">返回客服对话</a>
+    </div>
+    <div class="wrap">
+        <div class="toolbar">
+            <input id="kw" placeholder="搜索标题/正文/标签" style="min-width:220px">
+            <input id="catFilter" placeholder="分类" style="width:140px">
+            <select id="statusFilter">
+                <option value="">全部状态</option>
+                <option>READY</option>
+                <option>DRAFT</option>
+                <option>INDEXING</option>
+                <option>FAILED</option>
+            </select>
+            <button class="btn-primary" onclick="loadDocs()">查询</button>
+            <button onclick="resetForm()">新建文章</button>
+            <button onclick="seedFaqs()">重刷种子 FAQ</button>
+        </div>
+        <div class="grid">
+            <div class="card">
+                <h2>文档列表</h2>
+                <div style="overflow:auto; max-height:520px">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>标题</th>
+                                <th>分类</th>
+                                <th>状态</th>
+                                <th>切片</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="docBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card">
+                <h2 id="formTitle">新建 / 编辑</h2>
+                <div class="form">
+                    <input type="hidden" id="docId">
+                    <input id="title" placeholder="标题">
+                    <div class="row">
+                        <input id="category" placeholder="分类，如 售后政策">
+                        <input id="tags" placeholder="标签，逗号分隔">
+                        <select id="sourceType">
+                            <option value="ARTICLE">ARTICLE</option>
+                            <option value="FAQ">FAQ</option>
+                        </select>
+                    </div>
+                    <textarea id="content" placeholder="正文（Markdown / 纯文本。FAQ 建议使用 Q: / A: 分段）"></textarea>
+                    <div class="row">
+                        <button class="btn-primary" onclick="saveDoc()">保存并索引</button>
+                        <label class="muted" style="display:flex;align-items:center;gap:8px">
+                            上传 PDF/Word/MD/TXT
+                            <input type="file" id="file" accept=".pdf,.doc,.docx,.md,.markdown,.txt,.html">
+                        </label>
+                        <button onclick="uploadFile()">上传索引</button>
+                    </div>
+                    <p class="muted" id="formHint"></p>
+                </div>
+            </div>
+        </div>
+        <div class="grid" style="margin-top:16px">
+            <div class="card">
+                <h2>切片预览 <span class="muted" id="chunkHint"></span></h2>
+                <div id="chunks" style="max-height:360px;overflow:auto"></div>
+            </div>
+            <div class="card">
+                <h2>检索试跑</h2>
+                <div class="form">
+                    <div class="row">
+                        <input id="query" placeholder="输入用户问句，例如：怎么开发票">
+                        <button class="btn-primary" onclick="testSearch()">检索</button>
+                    </div>
+                    <div id="hits"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+        const api = '/api/v1/knowledge';
+
+        async function loadDocs() {
+            const q = new URLSearchParams({
+                keyword: document.getElementById('kw').value,
+                category: document.getElementById('catFilter').value,
+                status: document.getElementById('statusFilter').value
+            });
+            const docs = await (await fetch(`${api}/docs?${q}`)).json();
+            const body = document.getElementById('docBody');
+            body.innerHTML = (docs || []).map(d => `
+                <tr>
+                    <td>
+                        <strong>${esc(d.title)}</strong>
+                        <div class="muted">${esc(d.docId)} · ${esc(d.sourceType || '')}${d.isActive ? '' : ' · 已下线'}</div>
+                        ${d.indexError ? `<div class="err">${esc(d.indexError)}</div>` : ''}
+                    </td>
+                    <td>${esc(d.category || '')}</td>
+                    <td><span class="badge ${esc(d.status)}">${esc(d.status)}</span></td>
+                    <td>${d.chunkCount || 0}</td>
+                    <td class="actions">
+                        <button onclick="editDoc('${d.docId}')">编辑</button>
+                        <button onclick="loadChunks('${d.docId}', '${esc(d.title)}')">切片</button>
+                        <button onclick="reindex('${d.docId}')">重索引</button>
+                        <button onclick="toggleActive('${d.docId}', ${d.isActive ? 'false' : 'true'})">${d.isActive ? '下线' : '上线'}</button>
+                        <button class="btn-danger" onclick="removeDoc('${d.docId}')">删除</button>
+                    </td>
+                </tr>
+            `).join('') || '<tr><td colspan="5" class="muted">暂无文档</td></tr>';
+        }
+
+        function resetForm() {
+            document.getElementById('docId').value = '';
+            document.getElementById('title').value = '';
+            document.getElementById('category').value = '';
+            document.getElementById('tags').value = '';
+            document.getElementById('content').value = '';
+            document.getElementById('sourceType').value = 'ARTICLE';
+            document.getElementById('formTitle').textContent = '新建文章';
+            document.getElementById('formHint').textContent = '';
+        }
+
+        async function editDoc(id) {
+            const d = await (await fetch(`${api}/docs/${id}`)).json();
+            document.getElementById('docId').value = d.docId;
+            document.getElementById('title').value = d.title || '';
+            document.getElementById('category').value = d.category || '';
+            document.getElementById('tags').value = d.tags || '';
+            document.getElementById('content').value = d.content || '';
+            document.getElementById('sourceType').value = d.sourceType === 'FAQ' ? 'FAQ' : 'ARTICLE';
+            document.getElementById('formTitle').textContent = '编辑 ' + d.title;
+            document.getElementById('formHint').textContent = d.fileName ? ('原文件: ' + d.fileName) : '';
+            loadChunks(id, d.title);
+        }
+
+        async function saveDoc() {
+            const id = document.getElementById('docId').value;
+            const payload = {
+                title: document.getElementById('title').value,
+                category: document.getElementById('category').value,
+                tags: document.getElementById('tags').value,
+                content: document.getElementById('content').value,
+                sourceType: document.getElementById('sourceType').value,
+                indexNow: true,
+                reindex: true
+            };
+            const url = id ? `${api}/docs/${id}` : `${api}/docs`;
+            const res = await fetch(url, {
+                method: id ? 'PUT' : 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            document.getElementById('formHint').textContent = data.status === 'FAILED'
+                ? ('索引失败: ' + (data.indexError || ''))
+                : ('已保存 · ' + (data.status || '') + ' · 切片 ' + (data.chunkCount || 0));
+            if (data.docId) document.getElementById('docId').value = data.docId;
+            await loadDocs();
+            if (data.docId) loadChunks(data.docId, data.title);
+        }
+
+        async function uploadFile() {
+            const file = document.getElementById('file').files[0];
+            if (!file) { alert('请选择文件'); return; }
+            const fd = new FormData();
+            fd.append('file', file);
+            fd.append('title', document.getElementById('title').value || file.name);
+            fd.append('category', document.getElementById('category').value || '');
+            const data = await (await fetch(`${api}/docs/upload`, { method: 'POST', body: fd })).json();
+            document.getElementById('formHint').textContent = data.indexError
+                ? ('上传索引失败: ' + data.indexError)
+                : ('已上传并索引 · 切片 ' + (data.chunkCount || 0));
+            await loadDocs();
+            if (data.docId) {
+                document.getElementById('docId').value = data.docId;
+                loadChunks(data.docId, data.title);
+            }
+        }
+
+        async function loadChunks(id, title) {
+            const rows = await (await fetch(`${api}/docs/${id}/chunks`)).json();
+            document.getElementById('chunkHint').textContent = title ? ('· ' + title) : '';
+            document.getElementById('chunks').innerHTML = (rows || []).map(c => `
+                <div class="chunk">
+                    <div class="muted">#${c.ordinal} ${esc(c.heading || '')} · ${c.tokenCount || 0} 字</div>
+                    <div>${esc(c.content || '')}</div>
+                </div>
+            `).join('') || '<div class="chunk muted">暂无切片，请先索引</div>';
+        }
+
+        async function reindex(id) {
+            await fetch(`${api}/docs/${id}/reindex`, { method: 'POST' });
+            await loadDocs();
+            loadChunks(id, '');
+        }
+
+        async function toggleActive(id, active) {
+            await fetch(`${api}/docs/${id}/publish`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ active })
+            });
+            await loadDocs();
+        }
+
+        async function removeDoc(id) {
+            if (!confirm('确认删除该文档及其向量？')) return;
+            await fetch(`${api}/docs/${id}`, { method: 'DELETE' });
+            resetForm();
+            document.getElementById('chunks').innerHTML = '';
+            await loadDocs();
+        }
+
+        async function seedFaqs() {
+            const data = await (await fetch(`${api}/seed`, { method: 'POST' })).json();
+            alert(data.message + ' · ' + data.upserted + ' 篇');
+            await loadDocs();
+        }
+
+        async function testSearch() {
+            const query = document.getElementById('query').value.trim();
+            if (!query) return;
+            const data = await (await fetch(`${api}/search/test`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query, topK: 5 })
+            })).json();
+            document.getElementById('hits').innerHTML = (data.hits || []).map((h, i) => `
+                <div class="hit">
+                    <strong>[${i + 1}] ${esc(h.title || '')}</strong>
+                    <div class="muted">${esc(h.heading || '')} · rerank ${fmt(h.rerankScore)} · vector ${fmt(h.vectorScore)} · keyword ${fmt(h.keywordScore)}</div>
+                    <div>${esc(h.content || '')}</div>
+                </div>
+            `).join('') || '<div class="muted">无命中</div>';
+        }
+
+        function fmt(v) { return v == null ? '-' : Number(v).toFixed(3); }
+        function esc(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        loadDocs();
+    </script>
+</body>
+</html>

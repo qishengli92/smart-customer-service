@@ -105,11 +105,23 @@ cs:
     host: ${MILVUS_HOST:localhost}
     port: ${MILVUS_PORT:19530}
     database: default
-    collection-prefix: cs_
+    collection-prefix: cs_          # → cs_knowledge, cs_memory
     top-k: 5
     similarity-threshold: 0.7
     embedding-dimension: 1024
     auto-seed: true
+
+  # ====== 知识库 RAG ======
+  knowledge:
+    upload-dir: ${CS_KNOWLEDGE_UPLOAD_DIR:./data/knowledge}
+    chunk-size: 700
+    chunk-overlap: 100
+    recall-k: 20
+    max-upload-bytes: 10485760
+    rerank:
+      enabled: true
+      model: gte-rerank-v2
+      top-n: 5
 
   # ====== Agent 配置 ======
   agent:
@@ -155,8 +167,9 @@ logging:
     io.milvus: WARN
     org.springframework.web: INFO
     org.hibernate.SQL: WARN
+    org.apache.tika: WARN
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
 
 # ====== WebFlux 配置 ======
-spring.codec.max-in-memory-size: 2MB
+spring.codec.max-in-memory-size: 15MB

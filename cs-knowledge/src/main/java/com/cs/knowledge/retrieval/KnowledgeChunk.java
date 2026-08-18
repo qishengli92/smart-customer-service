@@ -8,7 +8,7 @@ import lombok.NoArgsConstructor;
 import java.util.Map;
 
 /**
- * RAG 单条检索命中（id / content / score / metadata），由 KnowledgeRetrievalService 组装。
+ * RAG 单条检索命中。
  */
 @Data
 @Builder
@@ -16,35 +16,22 @@ import java.util.Map;
 @AllArgsConstructor
 public class KnowledgeChunk {
 
-    /**
-     * 文档片段ID
-     */
     private String chunkId;
-
-    /**
-     * 来源文档名称
-     */
+    private String docId;
     private String sourceDoc;
-
-    /**
-     * 片段内容
-     */
+    private String heading;
     private String content;
-
-    /**
-     * 相似度分数
-     */
     private Float score;
-
-    /**
-     * 元数据
-     */
+    private Float vectorScore;
+    private Float keywordScore;
+    private Float rerankScore;
     private Map<String, String> metadata;
 
-    /**
-     * 格式化为上下文注入文本
-     */
     public String toContextText() {
-        return String.format("[来源: %s]\n%s", sourceDoc, content);
+        String cat = metadata != null ? metadata.getOrDefault("category", "") : "";
+        String title = sourceDoc != null ? sourceDoc : "";
+        String head = heading != null && !heading.isBlank() && !heading.equals(title) ? heading : title;
+        String label = cat.isBlank() ? head : head + " / " + cat;
+        return String.format("[%s]\n%s", label, content);
     }
 }

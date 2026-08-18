@@ -168,14 +168,35 @@ CREATE TABLE IF NOT EXISTS cs_knowledge_doc (
     doc_id          VARCHAR(64)    PRIMARY KEY,
     title           VARCHAR(512)   NOT NULL,
     category        VARCHAR(128),
-    content         TEXT           NOT NULL,
+    content         TEXT           NOT NULL DEFAULT '',
     source          VARCHAR(256),
-    tags            VARCHAR(512)[],
+    source_type     VARCHAR(32)    DEFAULT 'ARTICLE',
+    file_name       VARCHAR(512),
+    file_path       VARCHAR(1024),
+    mime_type       VARCHAR(128),
+    parsed_text     TEXT,
+    status          VARCHAR(20)    DEFAULT 'DRAFT',
+    index_error     TEXT,
+    chunk_count     INTEGER        DEFAULT 0,
+    tags            VARCHAR(512),
     version         INTEGER        DEFAULT 1,
     is_active       BOOLEAN        DEFAULT TRUE,
     created_at      TIMESTAMPTZ    DEFAULT NOW(),
     updated_at      TIMESTAMPTZ    DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS cs_knowledge_chunk (
+    chunk_id        VARCHAR(64)    PRIMARY KEY,
+    doc_id          VARCHAR(64)    NOT NULL REFERENCES cs_knowledge_doc(doc_id) ON DELETE CASCADE,
+    ordinal         INTEGER        NOT NULL DEFAULT 0,
+    heading         VARCHAR(512),
+    content         TEXT           NOT NULL,
+    token_count     INTEGER        DEFAULT 0,
+    created_at      TIMESTAMPTZ    DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunk_doc ON cs_knowledge_chunk(doc_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_doc_status ON cs_knowledge_doc(status, is_active);
 
 CREATE TABLE IF NOT EXISTS cs_trace_snapshot (
     id              BIGSERIAL      PRIMARY KEY,

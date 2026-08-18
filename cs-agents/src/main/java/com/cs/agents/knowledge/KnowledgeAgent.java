@@ -33,6 +33,7 @@ public class KnowledgeAgent {
             2. 不得编造参考信息中没有的政策、价格、时效或产品参数
             3. 若参考信息不足，明确说明「知识库暂未覆盖」，并建议换个问法或转人工
             4. 回答末尾可提示：如与订单实际情况不符，请提供订单号或转人工核实
+            5. 参考信息以 [1] [2] 编号。在相关句子末尾标注来源编号，如 [1]。禁止引用未出现的编号
             """;
 
     private final KnowledgeRAGHook ragHook;
@@ -62,8 +63,7 @@ public class KnowledgeAgent {
         log.info("KnowledgeAgent handling: {}",
                 userMessage.substring(0, Math.min(50, userMessage.length())));
 
-        String knowledgeContext = (context != null && !context.isBlank()
-                && !context.contains("未检索到"))
+        String knowledgeContext = (context != null && !context.isBlank())
                 ? context
                 : ragHook.beforeReasoning(userMessage, 5);
 
@@ -98,7 +98,10 @@ public class KnowledgeAgent {
     }
 
     private String stripInstructionTail(String context) {
-        int idx = context.indexOf("请基于以上信息回答");
+        int idx = context.indexOf("请基于以上编号参考回答");
+        if (idx < 0) {
+            idx = context.indexOf("请基于以上信息回答");
+        }
         if (idx > 0) {
             return context.substring(0, idx).trim();
         }

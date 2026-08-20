@@ -4,25 +4,20 @@ import com.cs.infra.config.MilvusProperties;
 import com.cs.infra.embedding.DashScopeEmbeddingService;
 import com.cs.knowledge.config.KnowledgeProperties;
 import com.cs.knowledge.milvus.MilvusKnowledgeStore;
-import com.cs.knowledge.persistence.entity.CsKnowledgeChunkEntity;
-import com.cs.knowledge.persistence.entity.CsKnowledgeDocEntity;
-import com.cs.knowledge.persistence.repo.CsKnowledgeChunkRepository;
-import com.cs.knowledge.persistence.repo.CsKnowledgeDocRepository;
+import com.cs.knowledge.persistence.repo.KnowledgeKeywordSearchDao;
 import com.cs.knowledge.rerank.DashScopeRerankService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 /**
- * 混合检索：向量 TopK + PG 关键词，RRF 融合后再 Rerank。
+ * 混合检索：向量 TopK + PG 关键词（库内过滤排序），RRF 融合后再 Rerank。
  */
 @Slf4j
 @Service
@@ -36,8 +31,7 @@ public class KnowledgeRetrievalService {
     private final MilvusKnowledgeStore milvusKnowledgeStore;
     private final DashScopeEmbeddingService embeddingService;
     private final DashScopeRerankService rerankService;
-    private final CsKnowledgeChunkRepository chunkRepository;
-    private final CsKnowledgeDocRepository docRepository;
+    private final KnowledgeKeywordSearchDao keywordSearchDao;
 
     public List<KnowledgeChunk> retrieve(String query, String collection, int topK, double threshold) {
         return retrieveHybrid(query, topK, threshold);
@@ -47,6 +41,7 @@ public class KnowledgeRetrievalService {
         return retrieveHybrid(query, topK, threshold);
     }
 
+    // 混合检索
     public List<KnowledgeChunk> retrieveHybrid(String query, int topK, double threshold) {
         if (query == null || query.isBlank()) {
             return List.of();
@@ -111,6 +106,7 @@ public class KnowledgeRetrievalService {
         return toRagResult(chunks).getContext();
     }
 
+    // 向量检索
     private List<KnowledgeChunk> retrieveFromMilvus(String query, int topK, double threshold) {
         if (milvusProperties.getHost() == null || milvusProperties.getHost().isBlank()) {
             return List.of();
@@ -129,73 +125,11 @@ public class KnowledgeRetrievalService {
 
     private List<KnowledgeChunk> keywordSearch(String query, int topK) {
         try {
-            List<CsKnowledgeChunkEntity> rows = chunkRepository.findAllSearchable();
-            if (rows.isEmpty()) {
-                return List.of();
-            }
-            Map<String, CsKnowledgeDocEntity> docs = new HashMap<>();
-            for (CsKnowledgeDocEntity d : docRepository.findAll()) {
-                docs.put(d.getDocId(), d);
-            }
-            String q = query.toLowerCase(Locale.ROOT);
-            List<KnowledgeChunk> scored = new ArrayList<>();
-            for (CsKnowledgeChunkEntity row : rows) {
-                CsKnowledgeDocEntity doc = docs.get(row.getDocId());
-                float score = keywordScore(q, doc, row);
-                if (score <= 0) {
-                    continue;
-                }
-                Map<String, String> meta = new HashMap<>();
-                if (doc != null && doc.getCategory() != null) {
-                    meta.put("category", doc.getCategory());
-                }
-                scored.add(KnowledgeChunk.builder()
-                        .chunkId(row.getChunkId())
-                        .docId(row.getDocId())
-                        .sourceDoc(doc != null ? doc.getTitle() : "")
-                        .heading(row.getHeading())
-                        .content(row.getContent())
-                        .keywordScore(score)
-                        .score(score)
-                        .metadata(meta)
-                        .build());
-            }
-            scored.sort(Comparator.comparing(KnowledgeChunk::getKeywordScore,
-                    Comparator.nullsLast(Comparator.reverseOrder())));
-            return scored.size() > topK ? scored.subList(0, topK) : scored;
+            return keywordSearchDao.search(query, topK);
         } catch (Exception e) {
             log.warn("Keyword search failed: {}", e.getMessage());
             return List.of();
         }
-    }
-
-    static float keywordScore(String queryLower, CsKnowledgeDocEntity doc, CsKnowledgeChunkEntity chunk) {
-        float score = 0f;
-        String title = doc != null && doc.getTitle() != null ? doc.getTitle().toLowerCase(Locale.ROOT) : "";
-        String content = chunk.getContent() != null ? chunk.getContent().toLowerCase(Locale.ROOT) : "";
-        String heading = chunk.getHeading() != null ? chunk.getHeading().toLowerCase(Locale.ROOT) : "";
-        String tags = doc != null && doc.getTags() != null ? doc.getTags().toLowerCase(Locale.ROOT) : "";
-        if (!title.isEmpty() && (title.contains(queryLower) || queryLower.contains(title))) {
-            score += 0.5f;
-        }
-        if (!heading.isEmpty() && heading.contains(queryLower)) {
-            score += 0.25f;
-        }
-        for (String token : queryLower.split("[\\s，。？?！!、,\\.]+")) {
-            if (token.length() < 2) {
-                continue;
-            }
-            if (title.contains(token) || heading.contains(token)) {
-                score += 0.2f;
-            }
-            if (content.contains(token)) {
-                score += 0.08f;
-            }
-            if (tags.contains(token)) {
-                score += 0.15f;
-            }
-        }
-        return Math.min(score, 1.0f);
     }
 
     private List<KnowledgeChunk> rrfFuse(List<KnowledgeChunk> vectorHits,

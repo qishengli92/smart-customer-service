@@ -18,6 +18,8 @@ import com.cs.common.model.PendingAction;
 import com.cs.common.model.RoutingDecision;
 import com.cs.common.model.StreamEvent;
 import com.cs.common.util.JsonUtils;
+import com.cs.common.util.OrderIdExtractor;
+import com.cs.common.util.SharedAgentContext;
 import com.cs.infra.observability.LangFuseTracer;
 import com.cs.infra.observability.TraceContext;
 import com.cs.infra.persistence.ConversationPersistenceService;
@@ -55,7 +57,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  *   <li>长期记忆：各 ReActAgent 原生 {@code LongTermMemory}（STATIC_CONTROL）</li>
  *   <li>RAG 由编排器显式调用（对齐 AS 废弃 GenericRAGHook，不挂到 ReActAgent）</li>
  *   <li>写操作 CONFIRM：{@link PendingActionStore} + {@link ConfirmedToolExecutor}，不恢复 ReAct</li>
- *   <li>sticky：空闲 {@link #STICKY_IDLE} 内优先沿用 {@code session.activeAgent}</li>
+ *   <li>sticky：空闲 {@link #STICKY_IDLE} 内优先沿用 {@code session.activeAgent}；纯订单号填槽不打断</li>
+ *   <li>跨 Agent：{@code session.context} 的订单号/子意图 + 近期对话经 {@link SharedAgentContext} 注入</li>
  *   <li>阻塞 I/O（Agent/JDBC）在 {@code boundedElastic}，Sink 保证 SSE 订阅前不丢事件</li>
  * </ul>
  */
@@ -177,6 +180,7 @@ public class SupervisorOrchestrator {
             shortTermMemory.addMessage(sessionId, userMsg);
             persistence.saveMessage(userMsg);
 
+            String previousAgent = session.getActiveAgent();
             IntentType intent = resolveIntent(session, userMessage, sink);
             session.setActiveAgent(intent.getCode());
             session.setContextVar("intent", intent.getCode());
@@ -190,7 +194,7 @@ public class SupervisorOrchestrator {
             }
             String ragContext = rag.isEmpty() ? "" : rag.getContext();
 
-            AgentHandleResult result = dispatchToAgent(intent, userMessage, ragContext, session);
+            AgentHandleResult result = dispatchToAgent(intent, userMessage, ragContext, session, previousAgent);
 
             if (result.hasPending()) {
                 session.setStatus(SessionStatus.WAITING_CONFIRM);
@@ -286,17 +290,18 @@ public class SupervisorOrchestrator {
         ChatMessage userMsg = ChatMessage.userMsg(session.getSessionId(), userMessage);
         shortTermMemory.addMessage(session.getSessionId(), userMsg);
         persistence.saveMessage(userMsg);
+        String previousAgent = session.getActiveAgent();
         IntentType intent = resolveIntent(session, userMessage, sink);
         session.setActiveAgent(intent.getCode());
         session.touch();
         persistence.upsertSession(session);
-        // 取消确认后续跑：RAG（如需）后派发；记忆由 AgentScope 组件负责
+        // 取消确认后续跑：RAG（如需）后派发；共享上下文仍注入领域 Agent
         RagResult rag = RagResult.empty();
         if (intent == IntentType.KNOWLEDGE || intent == IntentType.PRE_SALES) {
             rag = knowledgeRAGHook.retrieve(userMessage, 5);
         }
         String ragContext = rag.isEmpty() ? "" : rag.getContext();
-        AgentHandleResult result = dispatchToAgent(intent, userMessage, ragContext, session);
+        AgentHandleResult result = dispatchToAgent(intent, userMessage, ragContext, session, previousAgent);
         if (result.hasPending()) {
             session.setStatus(SessionStatus.WAITING_CONFIRM);
             persistence.upsertSession(session);
@@ -360,6 +365,7 @@ public class SupervisorOrchestrator {
 
         if (hasSticky && !shouldForceReroute(session, userMessage)) {
             IntentType stickyIntent = IntentType.fromCode(active);
+            mergeSessionSlots(session, userMessage, null);
             logTransition(session, active, stickyIntent.getCode(), "STICKY_SKIP", null);
             log.info("Sticky agent: {}", stickyIntent);
             return stickyIntent;
@@ -376,10 +382,8 @@ public class SupervisorOrchestrator {
         sink.tryEmitNext(StreamEvent.agentEnd("RouterAgent"));
 
         IntentType intent = decision.isLowConfidence() ? IntentType.CHITCHAT : decision.getIntent();
+        mergeSessionSlots(session, userMessage, decision);
         logTransition(session, active, intent.getCode(), "RE_ROUTE", decision);
-        if (decision.getEntities() != null) {
-            decision.getEntities().forEach(session::setContextVar);
-        }
         return intent;
     }
 
@@ -395,6 +399,13 @@ public class SupervisorOrchestrator {
                 && Duration.between(session.getLastActiveAt(), Instant.now()).compareTo(STICKY_IDLE) > 0) {
             return true;
         }
+        // 当前 Agent 正在等订单号：纯 ORD… / 「订单号是 ORD…」属于填槽，不打断 sticky
+        if (OrderIdExtractor.isProvidingOrderId(userMessage)) {
+            log.info("Keep sticky for order-id slot fill: active={}, msg={}",
+                    session.getActiveAgent(),
+                    userMessage.substring(0, Math.min(40, userMessage.length())));
+            return false;
+        }
         // 命中明确业务关键词且目标意图与当前 sticky Agent 不同 → 强制重路由
         // 例：闲聊后问「保修」应从 chitchat 切到 knowledge
         String active = session.getActiveAgent();
@@ -408,15 +419,53 @@ public class SupervisorOrchestrator {
         return false;
     }
 
+    /**
+     * 把本轮抽出的订单号/子意图写入 session.context，供后续 Agent 与 sticky 填槽复用。
+     */
+    private void mergeSessionSlots(ChatSession session, String userMessage, RoutingDecision decision) {
+        String orderId = OrderIdExtractor.extract(userMessage);
+        if (orderId != null) {
+            session.setContextVar("orderId", orderId);
+        }
+        if (decision != null) {
+            if (decision.getEntities() != null) {
+                decision.getEntities().forEach((k, v) -> {
+                    if (v != null && !v.isBlank()) {
+                        session.setContextVar(k, v);
+                    }
+                });
+            }
+            if (decision.getSubIntent() != null && !decision.getSubIntent().isBlank()) {
+                session.setContextVar("subIntent", decision.getSubIntent());
+            }
+            return;
+        }
+        refreshSubIntentFromMessage(session, userMessage);
+    }
+
+    private void refreshSubIntentFromMessage(ChatSession session, String userMessage) {
+        if (userMessage == null) {
+            return;
+        }
+        String lower = userMessage.toLowerCase();
+        if (lower.contains("退款") || lower.contains("退钱")) {
+            session.setContextVar("subIntent", "REFUND");
+        } else if (lower.contains("退货") || lower.contains("退换")) {
+            session.setContextVar("subIntent", "RETURN");
+        } else if (lower.contains("换货")) {
+            session.setContextVar("subIntent", "EXCHANGE");
+        }
+    }
+
     private AgentHandleResult dispatchToAgent(IntentType intent, String userMessage,
-                                              String ragContext, ChatSession session) {
+                                              String ragContext, ChatSession session,
+                                              String previousAgent) {
         String sessionId = session.getSessionId();
         String spanId = tracer.startAgentSpan(sessionId, intent.getCode(),
                 Map.of("message", userMessage), null);
         TraceContext.setParentSpanId(spanId);
         try {
-            // 业务补充上下文可为空；跨轮对话与长期记忆由 AgentScope StateStore / LongTermMemory 注入
-            String extra = "";
+            String extra = buildSharedContext(session, intent, previousAgent);
             AgentHandleResult result = switch (intent) {
                 case ORDER -> AgentHandleResult.text(orderAgent.handle(userMessage, extra));
                 case AFTER_SALES -> afterSalesAgent.handle(userMessage, extra,
@@ -437,6 +486,29 @@ public class SupervisorOrchestrator {
         } finally {
             TraceContext.setParentSpanId(null);
         }
+    }
+
+    private String buildSharedContext(ChatSession session, IntentType intent, String previousAgent) {
+        String orderId = contextString(session, "orderId");
+        String subIntent = contextString(session, "subIntent");
+        String recent = shortTermMemory.getRecentContext(session.getSessionId(), 4);
+        String toAgent = intent.getCode();
+        if (!SharedAgentContext.hasUsableContent(orderId, subIntent, previousAgent, toAgent, recent)) {
+            return "";
+        }
+        return SharedAgentContext.render(orderId, subIntent, previousAgent, toAgent, recent);
+    }
+
+    private static String contextString(ChatSession session, String key) {
+        if (session.getContext() == null) {
+            return null;
+        }
+        Object value = session.getContext().get(key);
+        if (value == null) {
+            return null;
+        }
+        String text = value.toString().trim();
+        return text.isEmpty() ? null : text;
     }
 
     private void logTransition(ChatSession session, String from, String to, String trigger,

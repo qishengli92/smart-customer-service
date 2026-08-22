@@ -7,6 +7,8 @@ import com.cs.common.model.OrderInfo;
 import com.cs.common.model.PendingAction;
 import com.cs.common.model.PermissionDecision;
 import com.cs.common.model.RiskAssessResult;
+import com.cs.common.util.OrderIdExtractor;
+import com.cs.common.util.SharedAgentContext;
 import com.cs.infra.agentscope.LangFuseAgentMiddleware;
 import com.cs.infra.observability.TraceContext;
 import com.cs.memory.agentscope.MilvusLongTermMemory;
@@ -42,7 +44,9 @@ public class AfterSalesAgent {
             规则：
             1. 不得编造订单、金额、confirmationId
             2. 若参考信息要求用户确认，必须在回复中保留 confirmationId，并提示回复「确认」或「取消」
-            3. 语气专业、共情，简洁中文
+            3. 若参考信息含已知订单号或近期对话已提供订单号，禁止再次索取
+            4. 若参考信息含已知子意图或用户已说明退款/退货/换货，按该意图继续办理，不要再问需要什么业务
+            5. 语气专业、共情，简洁中文
             """;
 
     private final OrderQueryTool orderQueryTool;
@@ -81,10 +85,10 @@ public class AfterSalesAgent {
                                     String sessionId, String userId, String tenantId) {
         log.info("AfterSalesAgent handling: {}", userMessage.substring(0, Math.min(50, userMessage.length())));
 
-        String orderId = extractOrderId(userMessage);
-        boolean isRefund = userMessage.contains("退款") || userMessage.contains("退钱");
+        String orderId = resolveOrderId(userMessage, context);
+        boolean isRefund = wantsRefund(userMessage, context);
 
-        if (orderId != null) {
+        if (orderId != null && shouldExecuteAfterSales(userMessage, context)) {
             OrderInfo order = orderQueryTool.queryOrder(orderId);
             if (order != null) {
                 if (isRefund) {
@@ -94,14 +98,67 @@ public class AfterSalesAgent {
             }
             return AgentHandleResult.text(llm(
                     userMessage,
-                    "系统查询结果：未找到订单号 " + orderId,
+                    joinFacts(context, "系统查询结果：未找到订单号 " + orderId),
                     "抱歉，未找到订单号 " + orderId + " 的相关信息。请确认订单号是否正确。"));
+        }
+
+        if (orderId != null) {
+            return AgentHandleResult.text(llm(
+                    userMessage,
+                    joinFacts(context, "已知订单号 " + orderId + "。请确认用户本轮要办理退款、退货还是换货，不要再索取订单号。"),
+                    "已记录订单号 " + orderId + "。请告诉我您需要退款、退货还是换货？"));
         }
 
         return AgentHandleResult.text(llm(
                 userMessage,
-                "用户尚未提供订单号。请引导其提供 ORD 开头订单号，以便办理退款/退货。",
+                joinFacts(context, "用户尚未提供订单号。请引导其提供 ORD 开头订单号，以便办理退款/退货。"),
                 "我是您的售后支持专员，可以帮您处理退款、退货、换货等售后问题。\n请提供您的订单号，我来为您处理。"));
+    }
+
+    private static String resolveOrderId(String userMessage, String context) {
+        String fromMessage = OrderIdExtractor.extract(userMessage);
+        if (fromMessage != null) {
+            return fromMessage;
+        }
+        return SharedAgentContext.orderIdOf(context);
+    }
+
+    private static boolean wantsRefund(String userMessage, String context) {
+        if (containsAny(userMessage, "退款", "退钱")) {
+            return true;
+        }
+        if (containsAny(userMessage, "退货", "换货", "退换")) {
+            return false;
+        }
+        return "REFUND".equals(SharedAgentContext.subIntentOf(context));
+    }
+
+    private static boolean shouldExecuteAfterSales(String userMessage, String context) {
+        if (containsAny(userMessage, "退款", "退货", "换货", "维修", "售后", "退钱", "退换")) {
+            return true;
+        }
+        String sub = SharedAgentContext.subIntentOf(context);
+        boolean hasGoal = "REFUND".equals(sub) || "RETURN".equals(sub) || "EXCHANGE".equals(sub);
+        return hasGoal && OrderIdExtractor.isProvidingOrderId(userMessage);
+    }
+
+    private static boolean containsAny(String text, String... keywords) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        for (String keyword : keywords) {
+            if (text.contains(keyword)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String joinFacts(String context, String facts) {
+        if (context == null || context.isBlank()) {
+            return facts;
+        }
+        return context + "\n" + facts;
     }
 
     private AgentHandleResult handleRefund(OrderInfo order, String userMessage,
@@ -223,11 +280,5 @@ public class AfterSalesAgent {
             log.warn("AfterSalesAgent ReActAgent failed: {}", e.getMessage());
             return fallback;
         }
-    }
-
-    private String extractOrderId(String message) {
-        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("ORD\\d+");
-        java.util.regex.Matcher matcher = pattern.matcher(message);
-        return matcher.find() ? matcher.group() : null;
     }
 }

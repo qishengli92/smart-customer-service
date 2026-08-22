@@ -2,6 +2,7 @@ package com.cs.agents;
 
 import com.cs.common.enums.IntentType;
 import com.cs.common.model.RoutingDecision;
+import com.cs.common.util.OrderIdExtractor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -88,11 +89,8 @@ public class RouterAgent {
 
         // 售后（退款等）优先于通用「订单」
         if (containsAny(lower, "退款", "退货", "换货", "维修", "售后", "退钱")) {
-            if (message.toUpperCase().matches("(?s).*ORD\\d+.*")) {
-                entities.put("orderId", extractOrderId(message));
-            }
-            String subIntent = lower.contains("退款") || lower.contains("退钱") ? "REFUND" :
-                    lower.contains("退货") ? "RETURN" : "EXCHANGE";
+            putOrderId(entities, message);
+            String subIntent = resolveAfterSalesSubIntent(lower);
             return RoutingDecision.builder()
                     .intent(IntentType.AFTER_SALES)
                     .subIntent(subIntent)
@@ -113,11 +111,10 @@ public class RouterAgent {
                     .build();
         }
 
-        // 订单查询
-        if (containsAny(lower, "订单", "物流", "快递", "到哪了", "发货", "地址", "ord")) {
-            if (message.toUpperCase().matches("(?s).*ORD\\d+.*")) {
-                entities.put("orderId", extractOrderId(message));
-            }
+        // 订单查询：订单号（ORD…）只作为实体，不单独构成订单意图，避免打断售后填槽
+        if (containsAny(lower, "订单", "物流", "快递", "到哪了", "发货", "地址")
+                && !OrderIdExtractor.isProvidingOrderId(message)) {
+            putOrderId(entities, message);
             return RoutingDecision.builder()
                     .intent(IntentType.ORDER)
                     .subIntent("QUERY")
@@ -179,10 +176,20 @@ public class RouterAgent {
         return false;
     }
 
-    private String extractOrderId(String text) {
-        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("ORD\\d+",
-                java.util.regex.Pattern.CASE_INSENSITIVE);
-        java.util.regex.Matcher matcher = pattern.matcher(text);
-        return matcher.find() ? matcher.group().toUpperCase() : "";
+    private void putOrderId(Map<String, String> entities, String message) {
+        String orderId = OrderIdExtractor.extract(message);
+        if (orderId != null) {
+            entities.put("orderId", orderId);
+        }
+    }
+
+    static String resolveAfterSalesSubIntent(String lower) {
+        if (lower.contains("退款") || lower.contains("退钱")) {
+            return "REFUND";
+        }
+        if (lower.contains("退货") || lower.contains("退换")) {
+            return "RETURN";
+        }
+        return "EXCHANGE";
     }
 }

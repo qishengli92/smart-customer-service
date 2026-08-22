@@ -1,6 +1,7 @@
 package com.cs.agents.complaint;
 
 import com.cs.common.model.ComplaintTicket;
+import com.cs.common.util.OrderIdExtractor;
 import com.cs.tools.ticket.ComplaintTool;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,7 +39,10 @@ public class ComplaintAgent {
         String severity = assessSeverity(userMessage);
 
         // 创建投诉工单
-        String orderId = extractOrderId(userMessage);
+        String orderId = OrderIdExtractor.extract(userMessage);
+        if (orderId == null) {
+            orderId = OrderIdExtractor.extract(context);
+        }
         ComplaintTicket ticket = complaintTool.createComplaint(userMessage, severity, orderId);
 
         // 根据严重程度给出不同响应
@@ -94,11 +98,5 @@ public class ComplaintAgent {
             return "MEDIUM";
         }
         return "LOW";
-    }
-
-    private String extractOrderId(String message) {
-        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("ORD\\d+");
-        java.util.regex.Matcher matcher = pattern.matcher(message);
-        return matcher.find() ? matcher.group() : null;
     }
 }

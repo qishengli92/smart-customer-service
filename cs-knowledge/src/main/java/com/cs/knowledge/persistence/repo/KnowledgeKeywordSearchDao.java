@@ -1,6 +1,5 @@
 package com.cs.knowledge.persistence.repo;
 
-import com.cs.knowledge.retrieval.KeywordQueryPrep;
 import com.cs.knowledge.retrieval.KnowledgeChunk;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -10,11 +9,11 @@ import org.springframework.stereotype.Repository;
 
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
- * 关键词召回：在 PG 内过滤 READY 文档、按字段权重打分、LIMIT TopK。
- * 候选过滤走 pg_trgm GIN（{@code lower(col) LIKE '%q%'}），不把全文装进 JVM。
+ * 关键词召回：GIN 倒排 {@code search_tsv @@ query}，{@code ts_rank_cd} 排序后 LIMIT。
  */
 @Slf4j
 @Repository
@@ -22,11 +21,10 @@ import java.util.Map;
 public class KnowledgeKeywordSearchDao {
 
     private static final String SEARCH_SQL = """
-            WITH params AS (
-                SELECT
-                    :query AS q,
-                    ('%' || replace(replace(replace(:query, '!', '!!'), '%', '!%'), '_', '!_') || '%') AS q_like,
-                    COALESCE(string_to_array(nullif(:tokens, ''), chr(31)), ARRAY[]::text[]) AS toks
+            WITH q AS (
+                SELECT to_tsquery('simple', tsq) AS query
+                FROM (SELECT nullif(cs_tsquery_or(:query), '') AS tsq) s
+                WHERE tsq IS NOT NULL
             )
             SELECT
                 c.chunk_id,
@@ -35,52 +33,12 @@ public class KnowledgeKeywordSearchDao {
                 c.heading,
                 c.content,
                 d.category,
-                LEAST(1.0,
-                    CASE
-                        WHEN length(d.title) > 0
-                         AND (strpos(lower(d.title), p.q) > 0 OR strpos(p.q, lower(d.title)) > 0)
-                        THEN 0.5 ELSE 0
-                    END
-                    + CASE
-                        WHEN length(coalesce(c.heading, '')) > 0
-                         AND strpos(lower(c.heading), p.q) > 0
-                        THEN 0.25 ELSE 0
-                    END
-                    + COALESCE((
-                        SELECT SUM(
-                            CASE WHEN strpos(lower(d.title), tok) > 0
-                                   OR strpos(lower(coalesce(c.heading, '')), tok) > 0
-                                 THEN 0.2 ELSE 0 END
-                            + CASE WHEN strpos(lower(c.content), tok) > 0 THEN 0.08 ELSE 0 END
-                            + CASE WHEN strpos(lower(coalesce(d.tags, '')), tok) > 0 THEN 0.15 ELSE 0 END
-                        )
-                        FROM unnest(p.toks) AS tok
-                        WHERE length(tok) >= 2
-                    ), 0)
-                )::real AS keyword_score
-            FROM cs_knowledge_chunk c
-            INNER JOIN cs_knowledge_doc d ON d.doc_id = c.doc_id
-            CROSS JOIN params p
+                ts_rank_cd(c.search_tsv, q.query, 32)::real AS keyword_score
+            FROM q
+            JOIN cs_knowledge_chunk c ON c.search_tsv @@ q.query
+            JOIN cs_knowledge_doc d ON d.doc_id = c.doc_id
             WHERE d.is_active IS TRUE
               AND d.status = 'READY'
-              AND (
-                    (length(d.title) > 0 AND strpos(p.q, lower(d.title)) > 0)
-                 OR lower(d.title) LIKE p.q_like ESCAPE '!'
-                 OR lower(coalesce(c.heading, '')) LIKE p.q_like ESCAPE '!'
-                 OR lower(c.content) LIKE p.q_like ESCAPE '!'
-                 OR lower(coalesce(d.tags, '')) LIKE p.q_like ESCAPE '!'
-                 OR EXISTS (
-                        SELECT 1
-                        FROM unnest(p.toks) AS tok
-                        WHERE length(tok) >= 2
-                          AND (
-                                lower(d.title) LIKE ('%' || replace(replace(replace(tok, '!', '!!'), '%', '!%'), '_', '!_') || '%') ESCAPE '!'
-                             OR lower(coalesce(c.heading, '')) LIKE ('%' || replace(replace(replace(tok, '!', '!!'), '%', '!%'), '_', '!_') || '%') ESCAPE '!'
-                             OR lower(c.content) LIKE ('%' || replace(replace(replace(tok, '!', '!!'), '%', '!%'), '_', '!_') || '%') ESCAPE '!'
-                             OR lower(coalesce(d.tags, '')) LIKE ('%' || replace(replace(replace(tok, '!', '!!'), '%', '!%'), '_', '!_') || '%') ESCAPE '!'
-                          )
-                    )
-              )
             ORDER BY keyword_score DESC, c.chunk_id ASC
             LIMIT :topK
             """;
@@ -88,13 +46,12 @@ public class KnowledgeKeywordSearchDao {
     private final NamedParameterJdbcTemplate jdbcTemplate;
 
     public List<KnowledgeChunk> search(String query, int topK) {
-        KeywordQueryPrep.Prepared prepared = KeywordQueryPrep.prepare(query);
-        if (prepared.query().isBlank() || topK <= 0) {
+        if (query == null || query.isBlank() || topK <= 0) {
             return List.of();
         }
+        String normalized = query.toLowerCase(Locale.ROOT).trim();
         MapSqlParameterSource params = new MapSqlParameterSource()
-                .addValue("query", prepared.query())
-                .addValue("tokens", prepared.tokens())
+                .addValue("query", normalized)
                 .addValue("topK", topK);
         List<KnowledgeChunk> hits = jdbcTemplate.query(SEARCH_SQL, params, (rs, rowNum) -> {
             Map<String, String> meta = new HashMap<>();
@@ -115,7 +72,7 @@ public class KnowledgeKeywordSearchDao {
                     .build();
         });
         log.debug("PG keyword search: query={}, hits={}",
-                prepared.query().substring(0, Math.min(30, prepared.query().length())),
+                normalized.substring(0, Math.min(30, normalized.length())),
                 hits.size());
         return hits;
     }

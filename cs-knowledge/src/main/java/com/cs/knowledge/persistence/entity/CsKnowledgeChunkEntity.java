@@ -35,6 +35,14 @@ public class CsKnowledgeChunkEntity {
     @Column(name = "heading", length = 512)
     private String heading;
 
+    /** 冗余自文档，供 search_tsv 加权（标题 A） */
+    @Column(name = "title", length = 512)
+    private String title;
+
+    /** 冗余自文档，供 search_tsv 加权（B） */
+    @Column(name = "tags", length = 512)
+    private String tags;
+
     @Column(name = "content", nullable = false, columnDefinition = "text")
     private String content;
 

@@ -98,6 +98,8 @@ public class KnowledgeIndexPipeline {
                         .docId(doc.getDocId())
                         .ordinal(draft.ordinal())
                         .heading(draft.heading())
+                        .title(doc.getTitle())
+                        .tags(doc.getTags())
                         .content(draft.content())
                         .tokenCount(draft.tokenCount())
                         .createdAt(now)

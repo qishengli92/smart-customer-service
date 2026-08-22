@@ -79,6 +79,7 @@ public class KnowledgeDocumentService {
         return doc;
     }
 
+    @Transactional
     public CsKnowledgeDocEntity updateArticle(String docId, String title, String category, String tags,
                                               String content, Boolean active, boolean reindex) {
         CsKnowledgeDocEntity doc = get(docId);
@@ -108,6 +109,7 @@ public class KnowledgeDocumentService {
         if (reindex) {
             return indexQuietly(docId);
         }
+        chunkRepository.updateTitleAndTags(docId, doc.getTitle(), doc.getTags());
         return get(docId);
     }
 
